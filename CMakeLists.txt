@@ -36,9 +36,19 @@ include_directories(
     ${GLM_INCLUDE_DIRS}
 )
 
-# Source files (will be populated as we develop)
+# Source files
 set(SOURCES
     src/main.cpp
+    src/graphics/Shader.cpp
+    src/graphics/Camera.cpp
+    src/utils/Random.cpp
+    src/utils/PerlinNoise.cpp
+    src/environment/Terrain.cpp
+    src/environment/Food.cpp
+    src/entities/Genome.cpp
+    src/entities/NeuralNetwork.cpp
+    src/entities/Creature.cpp
+    src/core/Simulation.cpp
 )
 
 # Executable
