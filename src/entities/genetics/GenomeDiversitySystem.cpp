@@ -1,5 +1,5 @@
 #include "GenomeDiversitySystem.h"
-#include "../../core/Random.h"
+#include "../../utils/Random.h"
 #include <algorithm>
 #include <cmath>
 #include <iostream>
@@ -31,7 +31,7 @@ void DiversityMetrics::calculateScore() {
         if (aquaticRatio > 0) entropy -= aquaticRatio * std::log2(aquaticRatio);
         if (flyingRatio > 0) entropy -= flyingRatio * std::log2(flyingRatio);
 
-        // Max entropy for 3 categories is log2(3) ≈ 1.585
+        // Max entropy for 3 categories is log2(3) ~= 1.585
         domainBalance = (entropy / 1.585f) * 100.0f;
     }
 
@@ -90,7 +90,8 @@ BiomeGenomeProfile GenomeDiversitySystem::getBaseProfileForBiome(BiomeType biome
             profile.secondaryNiche = EcologicalNiche::GENERALIST;
             break;
 
-        case BiomeType::DESERT:
+        case BiomeType::DESERT_HOT:
+        case BiomeType::DESERT_COLD:
             profile.preset = EvolutionStartPreset::EARLY_LIMB;
             profile.bias = EvolutionGuidanceBias::LAND;
             profile.sizeModifier = 0.85f;      // Smaller (heat regulation)
@@ -140,7 +141,9 @@ BiomeGenomeProfile GenomeDiversitySystem::getBaseProfileForBiome(BiomeType biome
             profile.secondaryNiche = EcologicalNiche::AMBUSH_PREDATOR;
             break;
 
-        case BiomeType::MOUNTAIN:
+        case BiomeType::ALPINE_MEADOW:
+        case BiomeType::ROCKY_HIGHLANDS:
+        case BiomeType::MOUNTAIN_FOREST:
             profile.preset = EvolutionStartPreset::ADVANCED;
             profile.bias = EvolutionGuidanceBias::FLIGHT;
             profile.sizeModifier = 0.9f;
@@ -150,7 +153,7 @@ BiomeGenomeProfile GenomeDiversitySystem::getBaseProfileForBiome(BiomeType biome
             profile.secondaryNiche = EcologicalNiche::GENERALIST;
             break;
 
-        case BiomeType::TAIGA:
+        case BiomeType::BOREAL_FOREST:
             profile.preset = EvolutionStartPreset::COMPLEX;
             profile.bias = EvolutionGuidanceBias::LAND;
             profile.sizeModifier = 1.15f;      // Moderate size
@@ -326,8 +329,8 @@ BiomeGenomeProfile GenomeDiversitySystem::selectProfile(
 
     // Override archetype hint based on creature type if needed
     switch (creatureType) {
-        case CreatureType::AQUATIC_BASIC:
-        case CreatureType::AQUATIC_SCHOOL:
+        case CreatureType::AQUATIC:
+        case CreatureType::AQUATIC_HERBIVORE:
             if (profile.archetypeHint == BiomeGenomeProfile::ArchetypeHint::GENERIC) {
                 profile.archetypeHint = BiomeGenomeProfile::ArchetypeHint::GENERIC;
             }
@@ -338,9 +341,13 @@ BiomeGenomeProfile GenomeDiversitySystem::selectProfile(
             profile.archetypeHint = BiomeGenomeProfile::ArchetypeHint::SHARK;
             break;
 
-        case CreatureType::FLYING_BASIC:
-        case CreatureType::FLYING_SMALL:
+        case CreatureType::FLYING:
+        case CreatureType::FLYING_BIRD:
             profile.archetypeHint = BiomeGenomeProfile::ArchetypeHint::BIRD;
+            break;
+
+        case CreatureType::FLYING_INSECT:
+            profile.archetypeHint = BiomeGenomeProfile::ArchetypeHint::INSECT;
             break;
 
         case CreatureType::AERIAL_PREDATOR:

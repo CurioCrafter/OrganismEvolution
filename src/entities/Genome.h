@@ -4,8 +4,9 @@
 #include <glm/glm.hpp>
 #include <cstdint>
 
-// Forward declaration
+// Forward declarations
 struct PlanetChemistry;
+enum class BiomeType : uint8_t;
 
 // ============================================================================
 // EVOLUTION START PRESETS
@@ -449,8 +450,6 @@ public:
     // VARIETY GENERATION (Phase 11 Agent 4)
     // ==========================================
     // Initialize genome with biome-specific variety to avoid near-identical starting populations
-
-    enum class BiomeType : uint8_t;  // Forward declaration
 
     // Initialize genome for a specific biome with natural variety
     void initializeForBiome(BiomeType biome,

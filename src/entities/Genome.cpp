@@ -1,5 +1,6 @@
 #include "Genome.h"
 #include "../utils/Random.h"
+#include "../environment/BiomeSystem.h"
 #include "../environment/PlanetChemistry.h"
 #include <algorithm>
 #include <cmath>
@@ -3342,54 +3343,6 @@ void Genome::initializeForRegion(const RegionEvolutionConfig& config,
 // ============================================================================
 // VARIETY GENERATION (Phase 11 Agent 4)
 // ============================================================================
-
-// Forward declaration of BiomeType - must match BiomeSystem.h
-enum class BiomeType : uint8_t {
-    // Water biomes
-    DEEP_OCEAN = 0,
-    OCEAN,
-    SHALLOW_WATER,
-    CORAL_REEF,
-    KELP_FOREST,
-
-    // Coastal biomes
-    BEACH_SANDY,
-    BEACH_ROCKY,
-    TIDAL_POOL,
-    MANGROVE,
-    SALT_MARSH,
-
-    // Lowland biomes
-    GRASSLAND,
-    SAVANNA,
-    TROPICAL_RAINFOREST,
-    TEMPERATE_FOREST,
-    SWAMP,
-    WETLAND,
-
-    // Highland biomes
-    SHRUBLAND,
-    BOREAL_FOREST,
-    ALPINE_MEADOW,
-    ROCKY_HIGHLANDS,
-    MOUNTAIN_FOREST,
-
-    // Extreme biomes
-    DESERT_HOT,
-    DESERT_COLD,
-    TUNDRA,
-    GLACIER,
-    VOLCANIC,
-    LAVA_FIELD,
-    CRATER_LAKE,
-
-    // Special biomes
-    CAVE_ENTRANCE,
-    RIVER_BANK,
-    LAKE_SHORE,
-
-    BIOME_COUNT
-};
 
 EvolutionStartPreset Genome::selectPresetForBiome(BiomeType biome) {
     // Map biomes to appropriate evolutionary starting points

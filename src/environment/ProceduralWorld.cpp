@@ -201,9 +201,9 @@ const GeneratedWorld& ProceduralWorld::generate(const WorldGenConfig& config) {
     );
 
     logLine("Initializing biome system...");
-    logLine("  World scale: %.1f units", config.terrainScale);
-    logLine("  Heightmap resolution: %d", config.heightmapResolution);
-    logLine("  Noise frequency: %.2f", config.noiseFrequency);
+    logLine("  World scale: " + std::to_string(config.terrainScale) + " units");
+    logLine("  Heightmap resolution: " + std::to_string(config.heightmapResolution));
+    logLine("  Noise frequency: " + std::to_string(config.noiseFrequency));
     reportProgress(0.65f, "Generating biomes...");
     // Create biome system and apply theme with climate variation
     world.biomeSystem = std::make_unique<BiomeSystem>();

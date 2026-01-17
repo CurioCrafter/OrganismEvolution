@@ -912,7 +912,7 @@ float SpeciesNamingSystem::validateNameGeneration(int count, uint32_t testSeed) 
 }
 
 // Validate naming coverage for all creature types
-SpeciesNamingSystem::CoverageTestResult SpeciesNamingSystem::validateCreatureTypeCoverage(uint32_t testSeed) const {
+SpeciesNamingSystem::CoverageTestResult SpeciesNamingSystem::validateCreatureTypeCoverage(uint32_t testSeed) {
     CoverageTestResult result;
     std::stringstream report;
 
@@ -983,7 +983,7 @@ SpeciesNamingSystem::CoverageTestResult SpeciesNamingSystem::validateCreatureTyp
         report << "  Common Name: " << (hasCommonName ? name.commonName : "[EMPTY]") << "\n";
         report << "  Scientific: " << name.scientificName << "\n";
         report << "  Descriptor: " << (hasDescriptor ? name.descriptor.getFullDescriptor() : "[EMPTY]") << "\n";
-        report << "  Status: " << (hasCommonName && hasDescriptor ? "✓ PASS" : "✗ FAIL") << "\n\n";
+        report << "  Status: " << (hasCommonName && hasDescriptor ? "[PASS]" : "[FAIL]") << "\n\n";
     }
 
     report << "=== Summary ===\n";

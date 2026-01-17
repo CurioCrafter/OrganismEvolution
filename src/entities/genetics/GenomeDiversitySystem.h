@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../Genome.h"
+#include "../../core/CreatureManager.h"
 #include "../../environment/BiomeSystem.h"
 #include "../../environment/PlanetChemistry.h"
 #include <glm/glm.hpp>

@@ -286,7 +286,7 @@ public:
         int emptyDescriptors = 0;
         std::string report;
     };
-    CoverageTestResult validateCreatureTypeCoverage(uint32_t testSeed = 42) const;
+    CoverageTestResult validateCreatureTypeCoverage(uint32_t testSeed = 42);
 
     // Export/import
     std::string exportToJson() const;
