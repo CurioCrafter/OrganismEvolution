@@ -5,6 +5,17 @@
 
 namespace animation {
 
+namespace {
+void EnsureTailRotations(std::vector<glm::quat>& rotations, int segments) {
+    if (segments < 0) {
+        segments = 0;
+    }
+    if (static_cast<int>(rotations.size()) != segments) {
+        rotations.assign(static_cast<size_t>(segments), glm::quat(1, 0, 0, 0));
+    }
+}
+}  // namespace
+
 // =============================================================================
 // BONE POSE KEY IMPLEMENTATION
 // =============================================================================
@@ -172,11 +183,7 @@ void SecondaryMotionLayer::setMorphology(const MorphologyGenes& genes) {
     m_tailSegments = genes.tailSegments;
     m_hasEars = true; // Assume ears unless specified
 
-    // Initialize tail rotations
-    m_tailRotations.resize(m_tailSegments);
-    for (auto& rot : m_tailRotations) {
-        rot = glm::quat(1, 0, 0, 0);
-    }
+    EnsureTailRotations(m_tailRotations, m_tailSegments);
 }
 
 void SecondaryMotionLayer::update(float deltaTime) {
@@ -218,7 +225,8 @@ void SecondaryMotionLayer::update(float deltaTime) {
     }
 
     // Tail motion
-    if (m_config.enableTailMotion && m_hasTail) {
+    if (m_config.enableTailMotion && m_hasTail && m_tailSegments > 0) {
+        EnsureTailRotations(m_tailRotations, m_tailSegments);
         m_tailPhase += deltaTime * m_config.tailWagSpeed * tailMod;
         float wagBase = std::sin(m_tailPhase * 2.0f * 3.14159f);
 
@@ -292,7 +300,8 @@ void SecondaryMotionLayer::applyToPose(SkeletonPose& pose, const Skeleton& skele
     }
 
     // Apply tail rotations
-    if (m_hasTail) {
+    if (m_hasTail && m_tailSegments > 0) {
+        EnsureTailRotations(m_tailRotations, m_tailSegments);
         for (int i = 0; i < m_tailSegments; ++i) {
             std::string boneName = "tail_" + std::to_string(i);
             int32_t tailBone = skeleton.findBoneIndex(boneName);

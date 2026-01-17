@@ -179,6 +179,14 @@ public:
     void setFABRIKConfig(const IKConfig& config) { m_fabrik.setConfig(config); }
     void setCCDConfig(const IKConfig& config) { m_ccd.setConfig(config); }
 
+    // Simple look-at control (for activity system)
+    void setLookAtTarget(const glm::vec3& target) { m_lookAtTarget = target; m_hasLookAt = true; }
+    void clearLookAtTarget() { m_hasLookAt = false; }
+    void setLookAtWeight(float weight) { m_lookAtWeight = weight; }
+    bool hasLookAtTarget() const { return m_hasLookAt; }
+    glm::vec3 getLookAtTarget() const { return m_lookAtTarget; }
+    float getLookAtWeight() const { return m_lookAtWeight; }
+
 private:
     std::vector<ChainEntry> m_chains;
     std::vector<ChainHandle> m_handleToIndex;
@@ -187,6 +195,11 @@ private:
     TwoBoneIK m_twoBone;
     FABRIKSolver m_fabrik;
     CCDSolver m_ccd;
+
+    // Simple look-at state
+    glm::vec3 m_lookAtTarget{0.0f};
+    float m_lookAtWeight = 0.0f;
+    bool m_hasLookAt = false;
 
     // Build bone chain indices from start to end
     std::vector<uint32_t> buildChainBones(const Skeleton& skeleton, const IKChain& chain) const;

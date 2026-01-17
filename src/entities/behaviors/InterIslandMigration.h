@@ -228,7 +228,7 @@ public:
                               MigrationType type, const MultiIslandManager& islands) const;
 
     // Get best migration type for a creature
-    MigrationType getBestMigrationType(const Creature* creature) const;
+    MigrationType getBestMigrationType(const Creature* creature);
 
 private:
     // Active migrations

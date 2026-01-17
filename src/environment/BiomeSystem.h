@@ -205,6 +205,18 @@ public:
     std::vector<glm::vec3> generateBiomeColorMap() const;
     std::string getBiomeName(BiomeType type) const;
 
+    // Biome diversity metrics (Phase 11 Agent 3)
+    struct BiomeDiversityMetrics {
+        int totalBiomeCount = 0;              // Number of distinct biomes
+        int largestPatchSize = 0;              // Size of largest contiguous patch
+        std::vector<int> biomeCounts;          // Count per biome type
+        std::vector<int> patchSizes;           // All patch sizes
+        float diversityIndex = 0.0f;           // Shannon diversity index
+        float dominance = 0.0f;                // Largest patch / total cells
+    };
+    BiomeDiversityMetrics calculateDiversityMetrics() const;
+    void logDiversityMetrics() const;
+
     // Accessors
     int getWidth() const { return m_width; }
     int getHeight() const { return m_height; }
@@ -230,6 +242,10 @@ private:
 
     // Initialize biome properties
     void initializeBiomeProperties();
+
+    // Patch noise generation (Phase 11 Agent 3)
+    float generatePatchNoise(float x, float y, uint32_t seed) const;
+    float perlinNoise(float x, float y, uint32_t seed) const;
 
     // Data
     std::vector<BiomeCell> m_biomeMap;

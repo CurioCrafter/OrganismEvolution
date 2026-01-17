@@ -57,6 +57,29 @@ struct CreatureHandle {
 };
 
 // ============================================================================
+// Spawn Result Tracking (PHASE 11 - Agent 8)
+// ============================================================================
+
+enum class SpawnFailureReason {
+    POPULATION_LIMIT = 0,
+    NO_WATER_FOUND = 1,
+    OUT_OF_BOUNDS = 2,
+    NO_TERRAIN = 3,
+    INVALID_POSITION = 4
+};
+
+inline const char* getSpawnFailureReasonName(SpawnFailureReason reason) {
+    switch (reason) {
+        case SpawnFailureReason::POPULATION_LIMIT: return "Population Limit";
+        case SpawnFailureReason::NO_WATER_FOUND: return "No Water Found";
+        case SpawnFailureReason::OUT_OF_BOUNDS: return "Out of Bounds";
+        case SpawnFailureReason::NO_TERRAIN: return "No Terrain";
+        case SpawnFailureReason::INVALID_POSITION: return "Invalid Position";
+        default: return "Unknown";
+    }
+}
+
+// ============================================================================
 // Population Statistics
 // ============================================================================
 
@@ -84,6 +107,12 @@ struct PopulationStats {
     int transitionsThisFrame = 0;             // Transitions in current update
     float avgTransitionProgress = 0.0f;       // Average progress across all transitioning creatures
 
+    // PHASE 11 - Agent 8: Spawn reliability tracking
+    int spawnAttempts = 0;
+    int spawnSuccesses = 0;
+    int spawnFailures = 0;
+    std::array<int, 5> failureReasons{};  // Indexed by SpawnFailureReason
+
     void reset() {
         byType.fill(0);
         byDomain.fill(0);
@@ -94,6 +123,8 @@ struct PopulationStats {
         avgBrainComplexity = 0.0f;
         totalTransitions = transitionsThisFrame = 0;
         avgTransitionProgress = 0.0f;
+        spawnAttempts = spawnSuccesses = spawnFailures = 0;
+        failureReasons.fill(0);
     }
 };
 

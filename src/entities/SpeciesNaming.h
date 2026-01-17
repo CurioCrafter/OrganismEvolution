@@ -278,6 +278,16 @@ public:
     // Validate names: generate N names and report collision rate
     float validateNameGeneration(int count, uint32_t testSeed) const;
 
+    // Validate coverage: test all creature types and report results
+    struct CoverageTestResult {
+        int totalTypesTested = 0;
+        int successfulNames = 0;
+        int emptyNames = 0;
+        int emptyDescriptors = 0;
+        std::string report;
+    };
+    CoverageTestResult validateCreatureTypeCoverage(uint32_t testSeed = 42) const;
+
     // Export/import
     std::string exportToJson() const;
     void importFromJson(const std::string& json);

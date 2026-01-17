@@ -1,9 +1,14 @@
 #include "TerrainSampler.h"
 #include <algorithm>
 #include <cmath>
+#include <vector>
 
 namespace TerrainSampler {
     namespace {
+        const std::vector<float>* s_heightmap = nullptr;
+        int s_heightmapWidth = 0;
+        int s_heightmapHeight = 0;
+
         inline float fade(float t) {
             return t * t * t * (t * (t * 6.0f - 15.0f) + 10.0f);
         }
@@ -86,9 +91,68 @@ namespace TerrainSampler {
             float t = std::max(0.0f, std::min(1.0f, (x - edge0) / (edge1 - edge0)));
             return t * t * (3.0f - 2.0f * t);
         }
+
+        float sampleHeightmap(float worldX, float worldZ) {
+            if (!s_heightmap || s_heightmapWidth <= 1 || s_heightmapHeight <= 1) {
+                return -1.0f;
+            }
+
+            float u = worldX / WORLD_SIZE + 0.5f;
+            float v = worldZ / WORLD_SIZE + 0.5f;
+            u = std::max(0.0f, std::min(1.0f, u));
+            v = std::max(0.0f, std::min(1.0f, v));
+
+            float x = u * (s_heightmapWidth - 1);
+            float y = v * (s_heightmapHeight - 1);
+
+            int x0 = static_cast<int>(std::floor(x));
+            int y0 = static_cast<int>(std::floor(y));
+            int x1 = std::min(x0 + 1, s_heightmapWidth - 1);
+            int y1 = std::min(y0 + 1, s_heightmapHeight - 1);
+
+            float tx = x - static_cast<float>(x0);
+            float ty = y - static_cast<float>(y0);
+
+            auto sample = [&](int sx, int sy) -> float {
+                return (*s_heightmap)[sy * s_heightmapWidth + sx];
+            };
+
+            float h00 = sample(x0, y0);
+            float h10 = sample(x1, y0);
+            float h01 = sample(x0, y1);
+            float h11 = sample(x1, y1);
+
+            float hx0 = lerp(h00, h10, tx);
+            float hx1 = lerp(h01, h11, tx);
+            return lerp(hx0, hx1, ty);
+        }
     } // namespace
 
+    void SetHeightmap(const std::vector<float>* heightmap, int width, int height) {
+        s_heightmap = heightmap;
+        s_heightmapWidth = width;
+        s_heightmapHeight = height;
+    }
+
+    void ClearHeightmap() {
+        s_heightmap = nullptr;
+        s_heightmapWidth = 0;
+        s_heightmapHeight = 0;
+    }
+
+    void SetWorldParams(float worldSize, float heightScale, float waterLevel, float beachLevel) {
+        WORLD_SIZE = worldSize;
+        HEIGHT_SCALE = heightScale;
+        WATER_LEVEL = waterLevel;
+        BEACH_LEVEL = beachLevel;
+    }
+
     float SampleHeightNormalized(float worldX, float worldZ) {
+        float mapHeight = sampleHeightmap(worldX, worldZ);
+        if (mapHeight >= 0.0f) {
+            return std::max(0.0f, std::min(1.0f, mapHeight));
+        }
+
         float nx = worldX / WORLD_SIZE + 0.5f;
         float nz = worldZ / WORLD_SIZE + 0.5f;
 

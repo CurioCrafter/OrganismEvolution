@@ -5,6 +5,7 @@
 // Creature Info Panel (Phase 6 - Camera & Selection)
 // ============================================================================
 void RenderCreatureInfoPanel() {
+    if (g_app.useUnifiedSimulation) return;
     if (g_app.selectedCreatureIndex < 0 && g_app.cameraFollowMode == AppState::CameraFollowMode::NONE) return;
     int targetIdx = (g_app.cameraFollowMode != AppState::CameraFollowMode::NONE) ? g_app.followCreatureId : g_app.selectedCreatureIndex;
     if (targetIdx < 0) return;

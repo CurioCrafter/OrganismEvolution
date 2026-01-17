@@ -17,6 +17,8 @@
 #include <string>
 #include <cstdint>
 
+struct WorldGenConfig;
+
 namespace ui {
 
 // ============================================================================
@@ -35,7 +37,7 @@ struct WorldGenConfig {
 
     // World structure
     int regionCount = 1;          // Number of islands/regions (1-7)
-    float worldSize = 500.0f;     // World dimensions
+    float worldSize = 2000.0f;    // World dimensions (4x larger default)
     float oceanCoverage = 0.3f;   // 0-1, amount of water
 
     // Biome mix (weights, normalized at generation)
@@ -287,5 +289,12 @@ private:
     void applyQualityPreset(SettingsConfig::QualityPreset preset);
     ImVec4 getPresetColor(PlanetPreset preset) const;
 };
+
+// ============================================================================
+// Config Translation Helper (MainMenu -> ProceduralWorld)
+// ============================================================================
+
+// Translate MainMenu config to ProceduralWorld config
+::WorldGenConfig translateToProceduralWorldConfig(const ui::WorldGenConfig& menuConfig);
 
 } // namespace ui

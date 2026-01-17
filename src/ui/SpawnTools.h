@@ -134,6 +134,10 @@ private:
     float m_screenWidth = 1920.0f;
     float m_screenHeight = 1080.0f;
 
+    // PHASE 11 - Agent 8: Spawn tracking
+    int m_lastSpawnAttempts = 0;
+    int m_lastSpawnSuccesses = 0;
+
     // Helper methods
     glm::vec3 getValidSpawnPosition(const glm::vec3& basePos, CreatureType type);
     std::vector<glm::vec3> generateSpawnPositions(const glm::vec3& center, int count);
@@ -244,18 +248,23 @@ inline void SpawnTools::update(float screenWidth, float screenHeight) {
 }
 
 inline bool SpawnTools::isValidSpawnLocation(const glm::vec3& pos, CreatureType type) {
-    if (!m_terrain) return true;
+    if (!m_terrain) return false;  // PHASE 11 - Agent 8: Reject if no terrain
 
     if (!m_terrain->isInBounds(pos.x, pos.z)) return false;
 
-    bool isWater = m_terrain->isWater(pos.x, pos.z);
+    // PHASE 11 - Agent 8: Use consistent water detection with CreatureManager
+    float terrainHeight = m_terrain->getHeight(pos.x, pos.z);
+    constexpr float waterLevel = 10.5f;  // SwimBehavior::getWaterLevelConstant()
+    bool isWater = (terrainHeight < waterLevel);
 
     if (isAquatic(type)) {
-        return isWater;
+        // Aquatic creatures need water AND position below surface
+        return isWater && (pos.y < waterLevel) && (pos.y > terrainHeight);
     } else if (isFlying(type)) {
         return true;  // Flying creatures can spawn anywhere
     } else {
-        return !isWater;
+        // Land creatures need land (terrain above or at water level)
+        return terrainHeight >= waterLevel;
     }
 }
 
@@ -263,15 +272,28 @@ inline glm::vec3 SpawnTools::getValidSpawnPosition(const glm::vec3& basePos, Cre
     glm::vec3 pos = basePos;
 
     if (m_terrain) {
-        // Adjust for terrain height
-        float height = m_terrain->getHeight(pos.x, pos.z);
-        pos.y = height;
+        // PHASE 11 - Agent 8: Improved spawn position calculation
+        float terrainHeight = m_terrain->getHeight(pos.x, pos.z);
+        constexpr float waterLevel = 10.5f;
 
-        // Adjust for aquatic/flying
         if (isAquatic(type)) {
-            pos.y = height - 2.0f;  // Underwater
+            // Aquatic creatures spawn underwater
+            if (terrainHeight < waterLevel) {
+                // Valid water location - spawn in water column
+                float waterDepth = waterLevel - terrainHeight;
+                float spawnDepth = std::min(2.0f, waterDepth * 0.5f);  // 50% depth or 2 units
+                pos.y = waterLevel - spawnDepth;
+            } else {
+                // Land terrain - keep at terrain height, CreatureManager will search for water
+                pos.y = terrainHeight;
+            }
         } else if (isFlying(type)) {
-            pos.y = height + 15.0f + (m_rng() % 20);  // Above terrain
+            // Flying creatures spawn above terrain with uniform random distribution
+            std::uniform_real_distribution<float> heightDist(15.0f, 35.0f);
+            pos.y = terrainHeight + heightDist(m_rng);
+        } else {
+            // Land creatures spawn at terrain height
+            pos.y = terrainHeight;
         }
     }
 
@@ -383,20 +405,44 @@ inline void SpawnTools::massSpawn(const AdvancedSpawnRequest& request) {
 
     auto positions = generateSpawnPositions(request.position, request.count);
 
+    // PHASE 11 - Agent 8: Track spawn attempts and results
+    m_lastSpawnAttempts = 0;
+    m_lastSpawnSuccesses = 0;
+
     for (const auto& pos : positions) {
-        if (!isValidSpawnLocation(pos, request.type)) continue;
+        m_lastSpawnAttempts++;
+
+        if (!isValidSpawnLocation(pos, request.type)) {
+            std::cout << "[SPAWN TOOLS] Skipping invalid location for "
+                      << getCreatureTypeName(request.type) << " at ("
+                      << pos.x << ", " << pos.y << ", " << pos.z << ")" << std::endl;
+            continue;
+        }
 
         glm::vec3 spawnPos = getValidSpawnPosition(pos, request.type);
 
+        Forge::CreatureHandle handle;
         if (request.useCustomGenome) {
             Genome genome = request.customGenome;
             if (request.genomeMutationRate > 0.0f) {
                 genome.mutate(request.genomeMutationRate, 0.1f);
             }
-            m_creatures->spawnWithGenome(spawnPos, genome);
+            handle = m_creatures->spawnWithGenome(spawnPos, genome);
         } else {
-            m_creatures->spawn(request.type, spawnPos);
+            handle = m_creatures->spawn(request.type, spawnPos);
         }
+
+        if (handle.isValid()) {
+            m_lastSpawnSuccesses++;
+        }
+    }
+
+    // PHASE 11 - Agent 8: Report spawn results
+    if (m_lastSpawnAttempts > 0) {
+        float successRate = (100.0f * m_lastSpawnSuccesses) / m_lastSpawnAttempts;
+        std::cout << "[SPAWN TOOLS] Mass spawn complete: " << m_lastSpawnSuccesses << "/"
+                  << m_lastSpawnAttempts << " (" << successRate << "%) "
+                  << getCreatureTypeName(request.type) << " spawned" << std::endl;
     }
 }
 

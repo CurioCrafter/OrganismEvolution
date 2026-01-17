@@ -6,6 +6,8 @@
 #include <sstream>
 #include <iostream>
 #include <iomanip>
+#include <fstream>
+#include <filesystem>
 
 // ============================================================================
 // ProceduralWorld Implementation
@@ -16,6 +18,14 @@ ProceduralWorld::ProceduralWorld()
 }
 
 ProceduralWorld::~ProceduralWorld() = default;
+
+void ProceduralWorld::reportProgress(float progress, const char* stage) const {
+    if (!m_progressCallback) {
+        return;
+    }
+    float clamped = std::clamp(progress, 0.0f, 1.0f);
+    m_progressCallback(clamped, stage ? stage : "");
+}
 
 uint32_t ProceduralWorld::ensureSeed(uint32_t seed) {
     if (seed == 0) {
@@ -46,10 +56,25 @@ uint32_t ProceduralWorld::ensureSeed(uint32_t seed) {
     return seed;
 }
 
-GeneratedWorld ProceduralWorld::generate(const WorldGenConfig& config) {
+const GeneratedWorld& ProceduralWorld::generate(const WorldGenConfig& config) {
     auto startTime = std::chrono::high_resolution_clock::now();
 
     GeneratedWorld world;
+
+    std::filesystem::create_directories("logs");
+    std::ofstream logFile("logs/worldgen_thread.log", std::ios::app);
+    auto logLine = [&](const std::string& msg) {
+        if (!logFile) return;
+        logFile << msg << "\n";
+        logFile.flush();
+    };
+    logLine("==== World Generation Start ====");
+    logLine("Seed: " + std::to_string(config.seed) +
+            " Resolution: " + std::to_string(config.heightmapResolution) +
+            " IslandShape: " + std::to_string(static_cast<int>(config.islandShape)) +
+            " Regions: " + std::to_string(config.desiredRegionCount) +
+            " Ocean: " + std::to_string(config.oceanCoverage));
+    reportProgress(0.05f, "Preparing seeds...");
 
     // Ensure we have a valid seed
     uint32_t seed = ensureSeed(config.seed);
@@ -82,8 +107,8 @@ GeneratedWorld ProceduralWorld::generate(const WorldGenConfig& config) {
     islandParams.generateCaves = config.generateCaves;
     islandParams.seed = world.planetSeed.terrainSeed;
 
-    // Water level variation from ocean seed
-    islandParams.waterLevel = 0.25f + oceanVar.coverage * 0.25f;  // 0.25 - 0.50 range
+    // Water level from config (with seed variation)
+    islandParams.waterLevel = config.oceanCoverage * (0.8f + oceanVar.coverage * 0.4f);  // Apply config + variation
 
     // Configure shape-specific parameters with seed variation
     switch (config.islandShape) {
@@ -107,29 +132,44 @@ GeneratedWorld ProceduralWorld::generate(const WorldGenConfig& config) {
     // Vary mountainousness based on terrain seed
     islandParams.mountainousness = 0.3f + terrainVar.ridgeBias * 0.5f;
 
+    logLine("Generating island heightmap...");
+    reportProgress(0.15f, "Generating terrain...");
     // Generate the island
     world.islandData = m_islandGenerator.generate(islandParams, config.heightmapResolution, config.heightmapResolution);
 
     // Post-processing with seed-driven erosion parameters
     int erosionPasses = 3 + static_cast<int>(terrainVar.erosionStrength * 4.0f);
+    logLine("Applying coastal erosion passes: " + std::to_string(erosionPasses));
+    reportProgress(0.25f, "Applying erosion...");
     m_islandGenerator.applyCoastalErosion(world.islandData, erosionPasses);
 
     if (config.generateRivers) {
+        logLine("Carving rivers...");
+        reportProgress(0.30f, "Carving rivers...");
         m_islandGenerator.carveRivers(world.islandData);
     }
     if (config.generateLakes) {
+        logLine("Creating lakes...");
+        reportProgress(0.33f, "Creating lakes...");
         m_islandGenerator.createLakes(world.islandData);
     }
     if (config.generateCaves) {
+        logLine("Marking cave entrances...");
+        reportProgress(0.36f, "Generating caves...");
         m_islandGenerator.markCaveEntrances(world.islandData);
     }
+    reportProgress(0.40f, "Generating seafloor...");
     m_islandGenerator.generateUnderwaterTerrain(world.islandData);
 
     int smoothPasses = 2 + static_cast<int>((1.0f - terrainVar.ridgeBias) * 3.0f);
+    logLine("Smoothing coastlines: " + std::to_string(smoothPasses));
+    reportProgress(0.45f, "Smoothing coastlines...");
     m_islandGenerator.smoothCoastlines(world.islandData, smoothPasses);
 
     // Create planet theme with weighted selection if enabled
     world.planetTheme = std::make_unique<PlanetTheme>();
+    logLine("Building planet theme...");
+    reportProgress(0.55f, "Building planet theme...");
 
     if (config.randomizeTheme) {
         // Full random theme
@@ -160,23 +200,38 @@ GeneratedWorld ProceduralWorld::generate(const WorldGenConfig& config) {
         0.8f
     );
 
+    logLine("Initializing biome system...");
+    logLine("  World scale: %.1f units", config.terrainScale);
+    logLine("  Heightmap resolution: %d", config.heightmapResolution);
+    logLine("  Noise frequency: %.2f", config.noiseFrequency);
+    reportProgress(0.65f, "Generating biomes...");
     // Create biome system and apply theme with climate variation
     world.biomeSystem = std::make_unique<BiomeSystem>();
+    world.biomeSystem->setWorldScale(config.terrainScale);
     world.biomeSystem->initializeWithTheme(*world.planetTheme);
     applyClimateVariation(*world.biomeSystem, world.planetSeed);
+    applyBiomeWeights(*world.biomeSystem, config.biomeWeights);
     world.biomeSystem->generateFromIslandData(world.islandData);
 
     // Generate biome map texture
+    reportProgress(0.72f, "Building biome map...");
     generateBiomeMapTexture();
 
     // Calculate statistics
+    reportProgress(0.78f, "Computing statistics...");
     calculateStatistics(world);
     calculateBiomeDistribution(world);
 
     // Cache palette variation and terrain params for shader integration
+    reportProgress(0.82f, "Finalizing palette...");
     cachePaletteVariation(world.planetSeed);
     cacheTerrainParams(world.planetSeed);
     determineVegetationPreset(world.planetSeed);
+    world.vegetationConfig = m_vegetationConfig;
+    // Generate planet chemistry profile
+    reportProgress(0.85f, "Generating planet chemistry...");
+    world.planetChemistry = PlanetChemistry::fromSeed(seed);
+
 
     // Store climate statistics
     world.averageTemperature = 15.0f + climateVar.temperatureBase;
@@ -190,13 +245,15 @@ GeneratedWorld ProceduralWorld::generate(const WorldGenConfig& config) {
     // Log generation details
     logWorldGeneration(world);
 
+    reportProgress(0.85f, "Finalizing world data...");
+    logLine("World generation complete.");
     // Store as current world
     m_currentWorld = std::make_unique<GeneratedWorld>(std::move(world));
 
     return *m_currentWorld;
 }
 
-GeneratedWorld ProceduralWorld::generateRandom(uint32_t seed) {
+const GeneratedWorld& ProceduralWorld::generateRandom(uint32_t seed) {
     seed = ensureSeed(seed);
 
     WorldGenConfig config;
@@ -212,7 +269,7 @@ GeneratedWorld ProceduralWorld::generateRandom(uint32_t seed) {
     return generate(config);
 }
 
-GeneratedWorld ProceduralWorld::generatePreset(IslandShape shape, PlanetPreset theme, uint32_t seed) {
+const GeneratedWorld& ProceduralWorld::generatePreset(IslandShape shape, PlanetPreset theme, uint32_t seed) {
     WorldGenConfig config;
     config.seed = ensureSeed(seed);
     config.islandShape = shape;
@@ -224,7 +281,7 @@ GeneratedWorld ProceduralWorld::generatePreset(IslandShape shape, PlanetPreset t
     return generate(config);
 }
 
-GeneratedWorld ProceduralWorld::generateEarthLikeIsland(uint32_t seed) {
+const GeneratedWorld& ProceduralWorld::generateEarthLikeIsland(uint32_t seed) {
     WorldGenConfig config;
     config.seed = ensureSeed(seed);
     config.islandShape = IslandShape::IRREGULAR;
@@ -238,7 +295,7 @@ GeneratedWorld ProceduralWorld::generateEarthLikeIsland(uint32_t seed) {
     return generate(config);
 }
 
-GeneratedWorld ProceduralWorld::generateAlienWorld(uint32_t seed) {
+const GeneratedWorld& ProceduralWorld::generateAlienWorld(uint32_t seed) {
     seed = ensureSeed(seed);
 
     // Pick a random alien theme
@@ -264,7 +321,7 @@ GeneratedWorld ProceduralWorld::generateAlienWorld(uint32_t seed) {
     return generate(config);
 }
 
-GeneratedWorld ProceduralWorld::generateArchipelago(uint32_t seed) {
+const GeneratedWorld& ProceduralWorld::generateArchipelago(uint32_t seed) {
     WorldGenConfig config;
     config.seed = ensureSeed(seed);
     config.islandShape = IslandShape::ARCHIPELAGO;
@@ -278,7 +335,7 @@ GeneratedWorld ProceduralWorld::generateArchipelago(uint32_t seed) {
     return generate(config);
 }
 
-GeneratedWorld ProceduralWorld::generateVolcanicIsland(uint32_t seed) {
+const GeneratedWorld& ProceduralWorld::generateVolcanicIsland(uint32_t seed) {
     WorldGenConfig config;
     config.seed = ensureSeed(seed);
     config.islandShape = IslandShape::VOLCANIC;
@@ -330,7 +387,7 @@ void ProceduralWorld::applyThemeToRenderers() {
     (void)constants;  // Use to update renderers
 }
 
-GeneratedWorld ProceduralWorld::regenerate() {
+const GeneratedWorld& ProceduralWorld::regenerate() {
     if (m_lastSeed == 0) {
         return generateRandom();
     }
@@ -747,6 +804,83 @@ void ProceduralWorld::applyClimateVariation(BiomeSystem& biomeSystem, const Plan
     biomeSystem.setClimateZones(zones);
 }
 
+void ProceduralWorld::applyBiomeWeights(BiomeSystem& biomeSystem, const BiomeWeights& weights) {
+    // Apply biome weight overrides to biome properties
+    // Weights affect the vegetation density and spawn rates for each biome type
+
+    auto scaleVegetation = [](BiomeProperties& props, float weight) {
+        props.treeDensity *= weight;
+        props.grassDensity *= weight;
+        props.shrubDensity *= weight;
+    };
+
+    // Forest biomes
+    if (weights.forestWeight != 1.0f) {
+        auto& tempForest = biomeSystem.getMutableProperties(BiomeType::TEMPERATE_FOREST);
+        scaleVegetation(tempForest, weights.forestWeight);
+
+        auto& borealForest = biomeSystem.getMutableProperties(BiomeType::BOREAL_FOREST);
+        scaleVegetation(borealForest, weights.forestWeight);
+
+        auto& tropicalForest = biomeSystem.getMutableProperties(BiomeType::TROPICAL_RAINFOREST);
+        scaleVegetation(tropicalForest, weights.forestWeight);
+    }
+
+    // Grassland biomes
+    if (weights.grasslandWeight != 1.0f) {
+        auto& savanna = biomeSystem.getMutableProperties(BiomeType::SAVANNA);
+        scaleVegetation(savanna, weights.grasslandWeight);
+
+        auto& grassland = biomeSystem.getMutableProperties(BiomeType::GRASSLAND);
+        scaleVegetation(grassland, weights.grasslandWeight);
+    }
+
+    // Desert biomes
+    if (weights.desertWeight != 1.0f) {
+        auto& hotDesert = biomeSystem.getMutableProperties(BiomeType::DESERT_HOT);
+        scaleVegetation(hotDesert, weights.desertWeight);
+
+        auto& coldDesert = biomeSystem.getMutableProperties(BiomeType::DESERT_COLD);
+        scaleVegetation(coldDesert, weights.desertWeight);
+    }
+
+    // Tundra biomes
+    if (weights.tundraWeight != 1.0f) {
+        auto& tundra = biomeSystem.getMutableProperties(BiomeType::TUNDRA);
+        scaleVegetation(tundra, weights.tundraWeight);
+    }
+
+    // Wetland biomes
+    if (weights.wetlandWeight != 1.0f) {
+        auto& swamp = biomeSystem.getMutableProperties(BiomeType::SWAMP);
+        scaleVegetation(swamp, weights.wetlandWeight);
+
+        auto& wetland = biomeSystem.getMutableProperties(BiomeType::WETLAND);
+        scaleVegetation(wetland, weights.wetlandWeight);
+
+        auto& mangrove = biomeSystem.getMutableProperties(BiomeType::MANGROVE);
+        scaleVegetation(mangrove, weights.wetlandWeight);
+    }
+
+    // Mountain biomes
+    if (weights.mountainWeight != 1.0f) {
+        auto& rocky = biomeSystem.getMutableProperties(BiomeType::ROCKY_HIGHLANDS);
+        scaleVegetation(rocky, weights.mountainWeight);
+
+        auto& alpine = biomeSystem.getMutableProperties(BiomeType::ALPINE_MEADOW);
+        scaleVegetation(alpine, weights.mountainWeight);
+    }
+
+    // Volcanic biomes
+    if (weights.volcanicWeight != 1.0f) {
+        auto& volcanic = biomeSystem.getMutableProperties(BiomeType::VOLCANIC);
+        scaleVegetation(volcanic, weights.volcanicWeight);
+
+        auto& lavaField = biomeSystem.getMutableProperties(BiomeType::LAVA_FIELD);
+        scaleVegetation(lavaField, weights.volcanicWeight);
+    }
+}
+
 void ProceduralWorld::logWorldGeneration(const GeneratedWorld& world) const {
     // Rarity string lookup
     const char* rarityStr = "Common";
@@ -758,11 +892,13 @@ void ProceduralWorld::logWorldGeneration(const GeneratedWorld& world) const {
     }
 
     // Vegetation preset string
-    const char* vegStr = "Normal";
-    switch (m_vegetationPreset) {
+    const char* vegStr = "Default";
+    switch (m_vegetationConfig.preset) {
         case VegetationPreset::SPARSE: vegStr = "Sparse"; break;
         case VegetationPreset::LUSH: vegStr = "Lush"; break;
         case VegetationPreset::ALIEN: vegStr = "Alien"; break;
+        case VegetationPreset::DEAD: vegStr = "Dead"; break;
+        case VegetationPreset::OVERGROWN: vegStr = "Overgrown"; break;
         default: break;
     }
 
@@ -783,7 +919,22 @@ void ProceduralWorld::logWorldGeneration(const GeneratedWorld& world) const {
     std::cout << "  Palette: warmth=" << std::setprecision(2) << m_cachedPaletteVariation.warmth
               << ", sat=" << m_cachedPaletteVariation.biomeSaturation
               << ", fog=" << m_cachedPaletteVariation.fogDensity << "\n";
-    std::cout << "  Generation Time: " << std::setprecision(1) << world.generationTimeMs << " ms\n";
+
+    // Planet chemistry logging
+    std::cout << "\n  === Planet Chemistry ===\n";
+    std::cout << "  Profile: " << world.planetChemistry.getProfileName() << "\n";
+    std::cout << "  Solvent: " << getSolventName(world.planetChemistry.solventType) << "\n";
+    std::cout << "  Atmosphere: O2=" << std::setprecision(1) << (world.planetChemistry.atmosphere.oxygen * 100.0f)
+              << "%, N2=" << (world.planetChemistry.atmosphere.nitrogen * 100.0f)
+              << "%, CO2=" << std::setprecision(2) << (world.planetChemistry.atmosphere.carbonDioxide * 100.0f)
+              << "% (" << std::setprecision(2) << world.planetChemistry.atmosphere.pressure << " atm)\n";
+    std::cout << "  Temperature: " << std::setprecision(0) << world.planetChemistry.temperatureBase
+              << "C +/- " << world.planetChemistry.temperatureRange << "C\n";
+    std::cout << "  pH: " << std::setprecision(1) << world.planetChemistry.acidity
+              << " | Radiation: " << std::setprecision(2) << world.planetChemistry.radiationLevel << "x Earth\n";
+    std::cout << "  Dominant Mineral: " << world.planetChemistry.minerals.getDominantMineral() << "\n";
+
+    std::cout << "\n  Generation Time: " << std::setprecision(1) << world.generationTimeMs << " ms\n";
     std::cout << "================================================\n\n";
 }
 
@@ -842,22 +993,12 @@ void ProceduralWorld::cacheTerrainParams(const PlanetSeed& seed) {
 }
 
 void ProceduralWorld::determineVegetationPreset(const PlanetSeed& seed) {
-    // Use vegetation seed to determine preset
-    float presetValue = PlanetSeed::seedToFloat(seed.vegetationSeed);
+    m_vegetationConfig = VegetationDensityConfig::fromSeed(seed.vegetationSeed);
 
-    if (presetValue < 0.2f) {
-        m_vegetationPreset = VegetationPreset::SPARSE;
-        m_cachedPaletteVariation.vegetationDensity *= 0.5f;
-    } else if (presetValue < 0.7f) {
-        m_vegetationPreset = VegetationPreset::NORMAL;
-        // Keep default density
-    } else if (presetValue < 0.9f) {
-        m_vegetationPreset = VegetationPreset::LUSH;
-        m_cachedPaletteVariation.vegetationDensity *= 1.5f;
-    } else {
-        m_vegetationPreset = VegetationPreset::ALIEN;
-        m_cachedPaletteVariation.vegetationDensity *= 1.2f;
-    }
+    float densityScale = (m_vegetationConfig.treeDensity +
+                          m_vegetationConfig.grassDensity +
+                          m_vegetationConfig.shrubDensity) / 3.0f;
+    m_cachedPaletteVariation.vegetationDensity *= densityScale;
 }
 
 ProceduralWorld::PaletteVariation ProceduralWorld::getCurrentPaletteVariation() const {
@@ -899,13 +1040,12 @@ const MultiRegionConfig& ProceduralWorld::getMultiRegionConfig() const {
 
 int ProceduralWorld::getRegionAtPosition(const glm::vec3& worldPos) const {
     // Find nearest island and return its region
-    if (!m_currentWorld) return -1;
-
-    int nearestIsland = m_islandGenerator.findNearestIsland(worldPos);
-    if (nearestIsland >= 0) {
-        const RegionConfig* region = getRegionConfig(nearestIsland);
-        if (region) return region->regionId;
+    if (!m_currentWorld || m_currentWorld->multiRegion.regions.empty()) return -1;
+    if (m_currentWorld->multiRegion.regions.size() == 1) {
+        return m_currentWorld->multiRegion.regions.front().regionId;
     }
+    (void)worldPos;
+    // TODO: IslandGenerator doesn't expose island positions for mapping yet.
     return -1;
 }
 
@@ -1363,4 +1503,48 @@ void WorldGenConfig::applyVariationFromSeed() {
     erosionStrength = terrainVar.erosionStrength;
     noiseOctaves = 4 + static_cast<int>(terrainVar.noiseFrequency * 4.0f);
     noiseFrequency = 0.5f + terrainVar.noiseFrequency;
+}
+
+// ============================================================================
+// World Output Getters Implementation
+// ============================================================================
+
+std::string ProceduralWorld::getThemeName() const {
+    if (m_currentWorld) {
+        return m_currentWorld->themeName;
+    }
+    return "Unknown";
+}
+
+float ProceduralWorld::getGenerationTimeMs() const {
+    if (m_currentWorld) {
+        return m_currentWorld->generationTimeMs;
+    }
+    return 0.0f;
+}
+
+float ProceduralWorld::getTerrainScale() const {
+    return m_lastConfig.terrainScale;
+}
+
+float ProceduralWorld::getWaterLevel() const {
+    if (m_currentWorld) {
+        return m_currentWorld->waterPercentage / 100.0f;
+    }
+    return 0.0f;
+}
+
+ProceduralWorld::BiomeDistribution ProceduralWorld::getBiomeDistribution() const {
+    BiomeDistribution dist;
+    if (m_currentWorld) {
+        dist.desertPercentage = m_currentWorld->desertCoverage;
+        dist.forestPercentage = m_currentWorld->forestCoverage;
+        dist.grasslandPercentage = 0.0f;  // Not tracked separately yet
+        dist.tundraPercentage = m_currentWorld->tundraCoverage;
+        dist.wetlandPercentage = m_currentWorld->wetlandCoverage;
+        dist.mountainPercentage = m_currentWorld->mountainCoverage;
+        dist.volcanicPercentage = 0.0f;   // Part of mountain coverage
+        dist.oceanPercentage = m_currentWorld->waterPercentage;
+    }
+    return dist;
 }

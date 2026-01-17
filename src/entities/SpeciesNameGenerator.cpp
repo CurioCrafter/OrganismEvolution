@@ -236,8 +236,23 @@ bool SpeciesNameGenerator::isPredator(CreatureType type) const {
 std::string SpeciesNameGenerator::selectPrefix(const Genome& genome, CreatureType type) const {
     const std::vector<std::string>* prefixList = nullptr;
 
+    // Handle special types first (SCAVENGER, PARASITE, CLEANER)
+    if (type == CreatureType::SCAVENGER) {
+        // Scavengers get shadow/dark prefixes (often nocturnal, opportunistic)
+        prefixList = &m_shadowPrefixes;
+    } else if (type == CreatureType::PARASITE) {
+        // Parasites get shadow/thorn prefixes (small, invasive)
+        if (genomeHash(genome, 10) > 0.5f) {
+            prefixList = &m_shadowPrefixes;
+        } else {
+            prefixList = &m_thornPrefixes;
+        }
+    } else if (type == CreatureType::CLEANER) {
+        // Cleaners get bright/light prefixes (symbiotic, visible)
+        prefixList = &m_dawnPrefixes;
+    }
     // Determine which prefix list to use based on traits
-    if (isAgile(genome)) {
+    else if (isAgile(genome)) {
         prefixList = &m_agilePrefixes;
     } else if (isHeavy(genome)) {
         prefixList = &m_heavyPrefixes;
@@ -285,7 +300,23 @@ std::string SpeciesNameGenerator::selectPrefix(const Genome& genome, CreatureTyp
 std::string SpeciesNameGenerator::selectSuffix(const Genome& genome, CreatureType type) const {
     const std::vector<std::string>* suffixList = nullptr;
 
-    if (isFlying(type)) {
+    // Handle special types first
+    if (type == CreatureType::SCAVENGER) {
+        // Scavengers are slow, methodical
+        suffixList = &m_crawlerSuffixes;
+    } else if (type == CreatureType::PARASITE) {
+        // Parasites are small and creeping
+        suffixList = &m_crawlerSuffixes;
+    } else if (type == CreatureType::CLEANER) {
+        // Cleaners are small, agile swimmers or hoppers
+        if (genome.speed > 12.0f) {
+            suffixList = &m_hopperSuffixes;
+        } else {
+            suffixList = &m_swimmerSuffixes;
+        }
+    }
+    // Flying types
+    else if (isFlying(type)) {
         if (isPredator(type)) {
             // Aerial predators dive
             suffixList = &m_diverSuffixes;
@@ -294,26 +325,37 @@ std::string SpeciesNameGenerator::selectSuffix(const Genome& genome, CreatureTyp
         } else {
             suffixList = &m_gliderSuffixes;
         }
-    } else if (isAquatic(type)) {
+    }
+    // Aquatic types
+    else if (isAquatic(type)) {
         if (isPredator(type)) {
             suffixList = &m_stalkerSuffixes;
         } else {
             suffixList = &m_swimmerSuffixes;
         }
-    } else if (isPredator(type)) {
+    }
+    // Terrestrial predators
+    else if (isPredator(type)) {
         if (genome.speed > 15.0f) {
             suffixList = &m_runnerSuffixes;
         } else {
             suffixList = &m_stalkerSuffixes;
         }
-    } else if (genome.speed > 15.0f) {
+    }
+    // Fast herbivores
+    else if (genome.speed > 15.0f) {
         suffixList = &m_runnerSuffixes;
-    } else if (genome.size < 0.6f && genome.speed > 10.0f) {
+    }
+    // Small hoppers
+    else if (genome.size < 0.6f && genome.speed > 10.0f) {
         suffixList = &m_hopperSuffixes;
-    } else if (genome.speed < 8.0f) {
+    }
+    // Slow creatures
+    else if (genome.speed < 8.0f) {
         suffixList = &m_crawlerSuffixes;
-    } else {
-        // Default: mix based on genome
+    }
+    // Default
+    else {
         float selector = genomeHash(genome, 12);
         if (selector < 0.5f) {
             suffixList = &m_runnerSuffixes;
@@ -334,25 +376,53 @@ std::string SpeciesNameGenerator::selectSuffix(const Genome& genome, CreatureTyp
 std::string SpeciesNameGenerator::selectSpeciesWord(const Genome& genome, CreatureType type) const {
     const std::vector<std::string>* speciesList = nullptr;
 
-    if (isFlying(type)) {
+    // Handle special types first
+    if (type == CreatureType::SCAVENGER) {
+        // Scavengers are bird-like (vulture) or mammal-like (hyena)
+        if (genomeHash(genome, 13) > 0.5f) {
+            speciesList = &m_birdSpecies;
+        } else {
+            speciesList = &m_mammalSpecies;
+        }
+    } else if (type == CreatureType::PARASITE) {
+        // Parasites are insect-like or small creatures
+        speciesList = &m_insectSpecies;
+    } else if (type == CreatureType::CLEANER) {
+        // Cleaners are fish-like (cleaner wrasse) or small creatures
+        if (genomeHash(genome, 13) > 0.6f) {
+            speciesList = &m_fishSpecies;
+        } else {
+            speciesList = &m_insectSpecies;
+        }
+    }
+    // Flying types
+    else if (isFlying(type)) {
         if (type == CreatureType::FLYING_INSECT) {
             speciesList = &m_insectSpecies;
         } else {
             speciesList = &m_birdSpecies;
         }
-    } else if (isAquatic(type)) {
+    }
+    // Aquatic types
+    else if (isAquatic(type)) {
         speciesList = &m_fishSpecies;
-    } else if (genome.size < 0.6f) {
+    }
+    // Small creatures
+    else if (genome.size < 0.6f) {
         // Small creatures can be insects or small mammals
         if (genomeHash(genome, 13) > 0.5f) {
             speciesList = &m_insectSpecies;
         } else {
             speciesList = &m_mammalSpecies;
         }
-    } else if (isPredator(type)) {
+    }
+    // Predators
+    else if (isPredator(type)) {
         // Predators are mammal-like
         speciesList = &m_mammalSpecies;
-    } else {
+    }
+    // Herbivores
+    else {
         // Herbivores can be any type
         float selector = genomeHash(genome, 14);
         if (selector < 0.35f) {

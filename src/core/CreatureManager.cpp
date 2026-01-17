@@ -80,7 +80,22 @@ void CreatureManager::clear() {
 
 CreatureHandle CreatureManager::spawn(CreatureType type, const glm::vec3& position,
                                        const Genome* parentGenome) {
+    m_stats.spawnAttempts++;
+
+    // Check 1: Population limit
     if (m_creatures.size() >= MAX_CREATURES && m_freeIndices.empty()) {
+        m_stats.spawnFailures++;
+        m_stats.failureReasons[static_cast<int>(SpawnFailureReason::POPULATION_LIMIT)]++;
+        std::cout << "[SPAWN FAILED] Population limit reached (" << MAX_CREATURES << ") for "
+                  << getCreatureTypeName(type) << std::endl;
+        return CreatureHandle::invalid();
+    }
+
+    // Check 2: Terrain available
+    if (!m_terrain) {
+        m_stats.spawnFailures++;
+        m_stats.failureReasons[static_cast<int>(SpawnFailureReason::NO_TERRAIN)]++;
+        std::cerr << "[SPAWN FAILED] Terrain not initialized for " << getCreatureTypeName(type) << std::endl;
         return CreatureHandle::invalid();
     }
 
@@ -115,30 +130,44 @@ CreatureHandle CreatureManager::spawn(CreatureType type, const glm::vec3& positi
                       << " at (" << validPos.x << ", " << validPos.y << ", " << validPos.z
                       << ") waterLevel=" << waterLevel << " terrainHeight=" << terrainHeight << std::endl;
         } else {
-            // Terrain is above water here - find a water position
-            // Try random positions until we find water
+            // Terrain is above water here - find a water position with progressive search
             bool foundWater = false;
-            for (int attempt = 0; attempt < 10; ++attempt) {
-                float searchX = position.x + (std::rand() % 100 - 50) * 2.0f;
-                float searchZ = position.z + (std::rand() % 100 - 50) * 2.0f;
+            const int maxAttempts = 20;
+
+            for (int attempt = 0; attempt < maxAttempts; ++attempt) {
+                // Progressive radius: start small, expand outward
+                float searchRadius = 10.0f + (attempt * 10.0f);  // 10, 20, 30... up to 200
+                float angle = (static_cast<float>(std::rand()) / RAND_MAX) * 2.0f * 3.14159f;
+
+                float searchX = position.x + cos(angle) * searchRadius;
+                float searchZ = position.z + sin(angle) * searchRadius;
                 glm::vec3 searchPos = clampToWorld(glm::vec3(searchX, 0.0f, searchZ));
                 float searchHeight = getTerrainHeight(searchPos);
 
                 if (searchHeight < waterLevel) {
-                    validPos.x = searchPos.x;
-                    validPos.z = searchPos.z;
                     float waterDepth = waterLevel - searchHeight;
-                    validPos.y = waterLevel - std::min(5.0f, waterDepth * 0.5f);
-                    foundWater = true;
-                    std::cout << "[AQUATIC SPAWN] Found water after " << (attempt + 1)
-                              << " attempts at (" << validPos.x << ", " << validPos.y << ", " << validPos.z << ")" << std::endl;
-                    break;
+                    if (waterDepth >= 1.0f) {  // Minimum depth check
+                        validPos.x = searchPos.x;
+                        validPos.z = searchPos.z;
+                        validPos.y = waterLevel - std::min(5.0f, waterDepth * 0.5f);
+                        foundWater = true;
+                        std::cout << "[AQUATIC SPAWN] Found water after " << (attempt + 1)
+                                  << " attempts (radius=" << searchRadius << ") at ("
+                                  << validPos.x << ", " << validPos.y << ", " << validPos.z << ")" << std::endl;
+                        break;
+                    }
                 }
             }
 
             if (!foundWater) {
-                std::cout << "[AQUATIC SPAWN] WARNING: Could not find water, spawning below surface anyway" << std::endl;
-                validPos.y = waterLevel - 5.0f;  // Just spawn below water level
+                // Failed to find water - abort spawn
+                m_stats.spawnFailures++;
+                m_stats.failureReasons[static_cast<int>(SpawnFailureReason::NO_WATER_FOUND)]++;
+                std::cout << "[SPAWN FAILED] No water found within 200 unit radius for "
+                          << getCreatureTypeName(type) << " at ("
+                          << position.x << ", " << position.z << "). Try spawning near coastline." << std::endl;
+                releaseSlot(index);  // Release allocated slot
+                return CreatureHandle::invalid();
             }
         }
     }
@@ -192,6 +221,9 @@ CreatureHandle CreatureManager::spawn(CreatureType type, const glm::vec3& positi
     m_stats.births++;
     m_stats.byType[static_cast<size_t>(type)]++;
     m_stats.byDomain[static_cast<size_t>(domain)]++;
+
+    // PHASE 11 - Agent 8: Track successful spawn
+    m_stats.spawnSuccesses++;
 
     return handle;
 }
@@ -850,10 +882,16 @@ void CreatureManager::rebuildDomainLists() {
 }
 
 float CreatureManager::getTerrainHeight(const glm::vec3& position) const {
-    if (m_terrain) {
-        return m_terrain->getHeight(position.x, position.z);
+    if (!m_terrain) {
+        // PHASE 11 - Agent 8: Log terrain access without initialization
+        static bool warningShown = false;
+        if (!warningShown) {
+            std::cerr << "[TERRAIN WARNING] Terrain not initialized, returning default height 0.0f" << std::endl;
+            warningShown = true;
+        }
+        return 0.0f;
     }
-    return 0.0f;
+    return m_terrain->getHeight(position.x, position.z);
 }
 
 glm::vec3 CreatureManager::clampToWorld(const glm::vec3& position) const {

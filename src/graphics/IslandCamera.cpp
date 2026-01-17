@@ -148,9 +148,7 @@ void IslandCamera::update(float deltaTime) {
             updateFollowing(deltaTime);
             break;
         case IslandCameraMode::CINEMATIC:
-            // Cinematic mode not implemented - fall back to island view
-            // To implement: add keyframe-based camera paths, smooth easing, etc.
-            updateIslandView(deltaTime);
+            updateCinematic(deltaTime);
             break;
     }
 
@@ -328,6 +326,75 @@ void IslandCamera::followMigration(const MigrationEvent& event, const MultiIslan
 void IslandCamera::stopFollowing() {
     m_followingMigration = nullptr;
     m_mode = IslandCameraMode::ISLAND_VIEW;
+}
+
+// ============================================================================
+// Cinematic Mode
+// ============================================================================
+
+void IslandCamera::startCinematicMode(const MultiIslandManager& islands) {
+    if (m_mode == IslandCameraMode::CINEMATIC) return;
+
+    // Calculate center of archipelago
+    const auto& data = islands.getArchipelagoData();
+    m_cinematicCenter = glm::vec3(data.center.x, 0.0f, data.center.y);
+
+    // Store previous mode for return
+    m_previousMode = m_mode;
+
+    // Reset cinematic time
+    m_cinematicTime = 0.0f;
+
+    // Transition to cinematic starting position
+    float angle = 0.0f;
+    glm::vec3 startPos = m_cinematicCenter + glm::vec3(
+        m_cinematicOrbitRadius * std::sin(angle),
+        m_cinematicHeight,
+        m_cinematicOrbitRadius * std::cos(angle)
+    );
+
+    startTransition(startPos, m_cinematicCenter, m_transitionParams.duration);
+
+    std::cout << "[IslandCamera] Starting cinematic mode" << std::endl;
+}
+
+void IslandCamera::stopCinematicMode() {
+    if (m_mode != IslandCameraMode::CINEMATIC && m_mode != IslandCameraMode::TRANSITION) return;
+
+    m_mode = m_previousMode;
+    std::cout << "[IslandCamera] Stopping cinematic mode" << std::endl;
+}
+
+void IslandCamera::updateCinematic(float deltaTime) {
+    // Increment time for smooth orbital motion
+    m_cinematicTime += deltaTime * m_cinematicSpeed;
+
+    // Calculate orbital position
+    float angle = m_cinematicTime;
+
+    // Smooth orbital path with slight height variation (figure-8 pattern)
+    float heightVariation = std::sin(m_cinematicTime * 0.5f) * 30.0f;
+
+    m_targetPosition = m_cinematicCenter + glm::vec3(
+        m_cinematicOrbitRadius * std::sin(angle),
+        m_cinematicHeight + heightVariation,
+        m_cinematicOrbitRadius * std::cos(angle)
+    );
+
+    // Always look at archipelago center with slight offset for interest
+    glm::vec3 targetOffset(
+        std::sin(angle * 0.3f) * 20.0f,
+        0.0f,
+        std::cos(angle * 0.3f) * 20.0f
+    );
+    m_targetTarget = m_cinematicCenter + targetOffset;
+
+    // Smooth interpolation
+    float smoothing = 2.0f * deltaTime;
+    smoothing = std::min(1.0f, smoothing);
+
+    m_currentPosition = glm::mix(m_currentPosition, m_targetPosition, smoothing);
+    m_currentTarget = glm::mix(m_currentTarget, m_targetTarget, smoothing);
 }
 
 // ============================================================================

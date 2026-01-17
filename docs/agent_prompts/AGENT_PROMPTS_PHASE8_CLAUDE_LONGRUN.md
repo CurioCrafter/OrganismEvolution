@@ -18,13 +18,17 @@ PLANNING EXPECTATIONS (NON-NEGOTIABLE)
 - Provide a rollback plan for risky changes (flags, toggles, or safe defaults).
 
 PROJECT DIRECTION (USER CONFIRMED)
-- Core fantasy: evolution sim as a spectator; god tools are optional and off by default.
-- Audience: simulation enthusiasts; prioritize depth and emergent outcomes over arcade goals.
-- Player role: omniscient observer with inspect mode; can nudge environments per region/biome.
-- Worldgen: procedural planets with distinct stars/climates; multiple regions/islands with competing species.
-- Evolution scope: start from different complexity levels; optional guidance biases (land/fly/etc).
-- Visual target: modern, polished look with realistic procedural UI.
-- Near-term demo goal: within days, enough depth/visuals for a YouTube showcase.
+- Core fantasy: evolution sim as a spectator; optional god tools, off by default.
+- Experience: isolated sandbox with multiple regions/islands and different biomes; player can nudge environments to compare outcomes.
+- Audience: simulation enthusiasts; depth and emergent outcomes over arcade goals.
+- Player role: omniscient observer with close-up inspection and focus camera on any creature.
+- Fun definition: see how environmental changes drive evolution; run different world setups and nudge species direction.
+- Must-have for next milestone: visible natural behaviors (hunt, eat, mate, excrete, care for young) with procedural animation; better lighting/shaders; robust creature inspection/focus; procedural world variety (plants/grass/trees/palettes, stars/climates).
+- Worldgen UX: main menu with planet generator (realistic vs alien) and settings; pre-run scene generator controls for biomes and vegetation.
+- Evolution scope: start from different complexity levels (bare to limb-bearing) with optional guidance (land/flight/aquatic); no hard shape bans; limb and sensory traits (eyes) should matter but stay simulation-cost aware.
+- Priority: simulation depth first, then visual polish; target RTX 3080.
+- Success metrics: multiple species groups competing across islands with clear biome differences; simulation feels realistic and organized (not sloppy).
+- Visual style: realistic, procedural, rich UI.
 
 ---
 

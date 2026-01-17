@@ -445,6 +445,37 @@ public:
     void initializeForRegion(const RegionEvolutionConfig& config,
                              const PlanetChemistry& chemistry);
 
+    // ==========================================
+    // VARIETY GENERATION (Phase 11 Agent 4)
+    // ==========================================
+    // Initialize genome with biome-specific variety to avoid near-identical starting populations
+
+    enum class BiomeType : uint8_t;  // Forward declaration
+
+    // Initialize genome for a specific biome with natural variety
+    void initializeForBiome(BiomeType biome,
+                           const PlanetChemistry& chemistry,
+                           float varietySeed = 0.0f);  // 0-1 seed for deterministic variety
+
+    // Choose appropriate preset based on biome characteristics
+    static EvolutionStartPreset selectPresetForBiome(BiomeType biome);
+
+    // Choose appropriate guidance bias based on biome characteristics
+    static EvolutionGuidanceBias selectBiasForBiome(BiomeType biome, float varietySeed);
+
+    // Apply variety mutations to create morphological diversity without affecting fitness too much
+    void applyVarietyMutations(float varietyStrength = 0.3f);
+
+    // Calculate diversity metrics for population analysis
+    struct DiversityMetrics {
+        float sizeVariance;
+        float speedVariance;
+        float colorVariance;
+        float morphologyVariance;  // Variance in limb counts, body shapes, etc.
+        float overallDiversity;    // Combined score 0-1
+    };
+    static DiversityMetrics calculatePopulationDiversity(const std::vector<Genome>& population);
+
     // Adapt biochemistry traits to match planet chemistry (call after other randomization)
     void adaptToChemistry(const PlanetChemistry& chemistry);
 

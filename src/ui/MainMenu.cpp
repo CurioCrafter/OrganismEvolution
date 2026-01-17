@@ -1,9 +1,26 @@
 #include "MainMenu.h"
+#include "../environment/ProceduralWorld.h"
+#include "../environment/IslandGenerator.h"
 #include <cstdlib>
 #include <ctime>
 #include <random>
+#include <algorithm>
 
 namespace ui {
+namespace {
+float ComputeUIScale(const ImGuiViewport* viewport, float userScale) {
+    const float baseWidth = 1920.0f;
+    const float baseHeight = 1080.0f;
+    float scaleX = viewport->Size.x / baseWidth;
+    float scaleY = viewport->Size.y / baseHeight;
+    float scale = std::min(scaleX, scaleY) * std::max(0.5f, userScale);
+    return std::clamp(scale, 0.75f, 2.0f);
+}
+
+ImVec2 ScaleVec(const ImVec2& value, float scale) {
+    return ImVec2(value.x * scale, value.y * scale);
+}
+}
 
 // ============================================================================
 // Constructor
@@ -64,32 +81,34 @@ void MainMenu::render() {
 
 void MainMenu::renderMainMenu() {
     ImGuiViewport* viewport = ImGui::GetMainViewport();
+    float uiScale = ComputeUIScale(viewport, m_settings.uiScale);
+    ImGui::SetWindowFontScale(uiScale);
     float centerX = viewport->Size.x * 0.5f;
     float centerY = viewport->Size.y * 0.5f;
 
     // Title
-    ImGui::SetCursorPos(ImVec2(centerX - 200, centerY - 200));
+    ImGui::SetCursorPos(ImVec2(centerX - 200.0f * uiScale, centerY - 200.0f * uiScale));
     ImGui::PushFont(ImGui::GetIO().Fonts->Fonts[0]);  // Use default font, would use larger if available
     ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.9f, 0.95f, 1.0f, 1.0f));
-    ImGui::SetWindowFontScale(2.5f);
+    ImGui::SetWindowFontScale(2.5f * uiScale);
     ImGui::Text("Organism Evolution");
-    ImGui::SetWindowFontScale(1.0f);
+    ImGui::SetWindowFontScale(uiScale);
     ImGui::PopStyleColor();
     ImGui::PopFont();
 
     // Subtitle
-    ImGui::SetCursorPos(ImVec2(centerX - 150, centerY - 150));
+    ImGui::SetCursorPos(ImVec2(centerX - 150.0f * uiScale, centerY - 150.0f * uiScale));
     ImGui::TextColored(ImVec4(0.6f, 0.7f, 0.8f, 1.0f), "Procedural Life Simulation");
 
     // Menu buttons
-    float buttonWidth = 250.0f;
-    float buttonHeight = 50.0f;
+    float buttonWidth = 250.0f * uiScale;
+    float buttonHeight = 50.0f * uiScale;
     float buttonX = centerX - buttonWidth * 0.5f;
-    float startY = centerY - 50;
-    float spacing = 60.0f;
+    float startY = centerY - 50.0f * uiScale;
+    float spacing = 60.0f * uiScale;
 
-    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 8.0f);
-    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(20, 12));
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 8.0f * uiScale);
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ScaleVec(ImVec2(20.0f, 12.0f), uiScale));
 
     // New Planet button
     ImGui::SetCursorPos(ImVec2(buttonX, startY));
@@ -141,7 +160,7 @@ void MainMenu::renderMainMenu() {
     ImGui::PopStyleVar(2);
 
     // Version info
-    ImGui::SetCursorPos(ImVec2(20, viewport->Size.y - 30));
+    ImGui::SetCursorPos(ImVec2(20.0f * uiScale, viewport->Size.y - 30.0f * uiScale));
     ImGui::TextDisabled("Version 1.0 - Phase 8");
 }
 
@@ -151,27 +170,29 @@ void MainMenu::renderMainMenu() {
 
 void MainMenu::renderNewPlanet() {
     ImGuiViewport* viewport = ImGui::GetMainViewport();
+    float uiScale = ComputeUIScale(viewport, m_settings.uiScale);
+    ImGui::SetWindowFontScale(uiScale);
 
     // Header with back button
-    ImGui::SetCursorPos(ImVec2(20, 20));
-    if (ImGui::Button("< Back", ImVec2(80, 30))) {
+    ImGui::SetCursorPos(ImVec2(20.0f * uiScale, 20.0f * uiScale));
+    if (ImGui::Button("< Back", ScaleVec(ImVec2(80.0f, 30.0f), uiScale))) {
         m_state = MainMenuState::MAIN;
     }
 
-    ImGui::SameLine(viewport->Size.x * 0.5f - 100);
-    ImGui::SetWindowFontScale(1.5f);
+    ImGui::SameLine(viewport->Size.x * 0.5f - 100.0f * uiScale);
+    ImGui::SetWindowFontScale(1.5f * uiScale);
     ImGui::Text("Create New Planet");
-    ImGui::SetWindowFontScale(1.0f);
+    ImGui::SetWindowFontScale(uiScale);
 
     // Content area - two columns
-    float leftColumnX = 50.0f;
-    float rightColumnX = viewport->Size.x * 0.5f + 50.0f;
-    float columnWidth = viewport->Size.x * 0.5f - 100.0f;
-    float contentY = 80.0f;
+    float leftColumnX = 50.0f * uiScale;
+    float rightColumnX = viewport->Size.x * 0.5f + 50.0f * uiScale;
+    float columnWidth = viewport->Size.x * 0.5f - 100.0f * uiScale;
+    float contentY = 80.0f * uiScale;
 
     // Left column - Planet configuration
     ImGui::SetCursorPos(ImVec2(leftColumnX, contentY));
-    ImGui::BeginChild("LeftColumn", ImVec2(columnWidth, viewport->Size.y - 180), true);
+    ImGui::BeginChild("LeftColumn", ImVec2(columnWidth, viewport->Size.y - 180.0f * uiScale), true);
 
     renderPlanetTypeSection();
     ImGui::Separator();
@@ -187,7 +208,7 @@ void MainMenu::renderNewPlanet() {
 
     // Right column - Evolution configuration
     ImGui::SetCursorPos(ImVec2(rightColumnX, contentY));
-    ImGui::BeginChild("RightColumn", ImVec2(columnWidth, viewport->Size.y - 180), true);
+    ImGui::BeginChild("RightColumn", ImVec2(columnWidth, viewport->Size.y - 180.0f * uiScale), true);
 
     renderEvolutionSection();
     ImGui::Separator();
@@ -196,14 +217,14 @@ void MainMenu::renderNewPlanet() {
     ImGui::EndChild();
 
     // Start button at bottom
-    float startButtonWidth = 300.0f;
-    float startButtonHeight = 60.0f;
+    float startButtonWidth = 300.0f * uiScale;
+    float startButtonHeight = 60.0f * uiScale;
     ImGui::SetCursorPos(ImVec2(
         viewport->Size.x * 0.5f - startButtonWidth * 0.5f,
-        viewport->Size.y - 90
+        viewport->Size.y - 90.0f * uiScale
     ));
 
-    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 12.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 12.0f * uiScale);
     ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.6f, 0.3f, 1.0f));
     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.3f, 0.7f, 0.4f, 1.0f));
 
@@ -212,7 +233,6 @@ void MainMenu::renderNewPlanet() {
             m_onStartGame(m_worldGenConfig, m_evolutionPreset, m_godModeEnabled);
         }
         m_active = false;
-        m_canContinue = true;
     }
 
     ImGui::PopStyleColor(2);
@@ -302,7 +322,7 @@ void MainMenu::renderWorldStructureSection() {
     }
 
     // World size
-    ImGui::SliderFloat("World Size", &m_worldGenConfig.worldSize, 200.0f, 1000.0f, "%.0f");
+    ImGui::SliderFloat("World Size", &m_worldGenConfig.worldSize, 800.0f, 4000.0f, "%.0f");
 
     // Ocean coverage
     ImGui::SliderFloat("Ocean Coverage", &m_worldGenConfig.oceanCoverage, 0.0f, 0.8f, "%.0f%%");
@@ -449,24 +469,28 @@ void MainMenu::renderGodModeToggle() {
 
 void MainMenu::renderSettings() {
     ImGuiViewport* viewport = ImGui::GetMainViewport();
+    float uiScale = ComputeUIScale(viewport, m_settings.uiScale);
+    ImGui::SetWindowFontScale(uiScale);
 
     // Header with back button
-    ImGui::SetCursorPos(ImVec2(20, 20));
-    if (ImGui::Button("< Back", ImVec2(80, 30))) {
+    ImGui::SetCursorPos(ImVec2(20.0f * uiScale, 20.0f * uiScale));
+    if (ImGui::Button("< Back", ScaleVec(ImVec2(80.0f, 30.0f), uiScale))) {
         m_state = MainMenuState::MAIN;
         if (m_onSettingsChanged) {
             m_onSettingsChanged(m_settings);
         }
     }
 
-    ImGui::SameLine(viewport->Size.x * 0.5f - 60);
-    ImGui::SetWindowFontScale(1.5f);
+    ImGui::SameLine(viewport->Size.x * 0.5f - 60.0f * uiScale);
+    ImGui::SetWindowFontScale(1.5f * uiScale);
     ImGui::Text("Settings");
-    ImGui::SetWindowFontScale(1.0f);
+    ImGui::SetWindowFontScale(uiScale);
 
     // Tab bar for different settings categories
-    ImGui::SetCursorPos(ImVec2(50, 80));
-    ImGui::BeginChild("SettingsContent", ImVec2(viewport->Size.x - 100, viewport->Size.y - 140), true);
+    ImGui::SetCursorPos(ImVec2(50.0f * uiScale, 80.0f * uiScale));
+    ImGui::BeginChild("SettingsContent",
+                      ImVec2(viewport->Size.x - 100.0f * uiScale, viewport->Size.y - 140.0f * uiScale),
+                      true);
 
     if (ImGui::BeginTabBar("SettingsTabs")) {
         if (ImGui::BeginTabItem("Graphics")) {
@@ -678,13 +702,16 @@ void MainMenu::renderAudioSettings() {
 
 void MainMenu::renderLoadGame() {
     ImGuiViewport* viewport = ImGui::GetMainViewport();
+    float uiScale = ComputeUIScale(viewport, m_settings.uiScale);
+    ImGui::SetWindowFontScale(uiScale);
 
-    ImGui::SetCursorPos(ImVec2(20, 20));
-    if (ImGui::Button("< Back", ImVec2(80, 30))) {
+    ImGui::SetCursorPos(ImVec2(20.0f * uiScale, 20.0f * uiScale));
+    if (ImGui::Button("< Back", ScaleVec(ImVec2(80.0f, 30.0f), uiScale))) {
         m_state = MainMenuState::MAIN;
     }
 
-    ImGui::SetCursorPos(ImVec2(viewport->Size.x * 0.5f - 100, viewport->Size.y * 0.5f));
+    ImGui::SetCursorPos(ImVec2(viewport->Size.x * 0.5f - 100.0f * uiScale,
+                               viewport->Size.y * 0.5f));
     ImGui::Text("Load Game - Coming Soon");
 }
 
@@ -694,15 +721,19 @@ void MainMenu::renderLoadGame() {
 
 void MainMenu::renderCredits() {
     ImGuiViewport* viewport = ImGui::GetMainViewport();
+    float uiScale = ComputeUIScale(viewport, m_settings.uiScale);
+    ImGui::SetWindowFontScale(uiScale);
 
-    ImGui::SetCursorPos(ImVec2(20, 20));
-    if (ImGui::Button("< Back", ImVec2(80, 30))) {
+    ImGui::SetCursorPos(ImVec2(20.0f * uiScale, 20.0f * uiScale));
+    if (ImGui::Button("< Back", ScaleVec(ImVec2(80.0f, 30.0f), uiScale))) {
         m_state = MainMenuState::MAIN;
     }
 
-    ImGui::SetCursorPos(ImVec2(viewport->Size.x * 0.5f - 100, viewport->Size.y * 0.5f - 50));
+    ImGui::SetCursorPos(ImVec2(viewport->Size.x * 0.5f - 100.0f * uiScale,
+                               viewport->Size.y * 0.5f - 50.0f * uiScale));
     ImGui::Text("Organism Evolution");
-    ImGui::SetCursorPos(ImVec2(viewport->Size.x * 0.5f - 100, viewport->Size.y * 0.5f));
+    ImGui::SetCursorPos(ImVec2(viewport->Size.x * 0.5f - 100.0f * uiScale,
+                               viewport->Size.y * 0.5f));
     ImGui::Text("A Procedural Life Simulation");
 }
 
@@ -840,6 +871,116 @@ ImVec4 MainMenu::getPresetColor(PlanetPreset preset) const {
         case PlanetPreset::BIOLUMINESCENT: return ImVec4(0.3f, 0.9f, 0.7f, 1.0f);
         default: return ImVec4(0.7f, 0.7f, 0.7f, 1.0f);
     }
+}
+
+// ============================================================================
+// Config Translation Helper Implementation
+// ============================================================================
+
+::WorldGenConfig translateToProceduralWorldConfig(const ui::WorldGenConfig& menuConfig) {
+    ::WorldGenConfig pwConfig;
+
+    // ========================================================================
+    // Seed
+    // ========================================================================
+    pwConfig.seed = menuConfig.useRandomSeed ? 0 : menuConfig.seed;
+
+    // ========================================================================
+    // Theme
+    // ========================================================================
+    pwConfig.themePreset = menuConfig.preset;
+    pwConfig.randomizeTheme = menuConfig.isAlienWorld;
+    pwConfig.useWeightedThemeSelection = !menuConfig.isAlienWorld;
+
+    // ========================================================================
+    // Star Type Conversion
+    // ========================================================================
+    pwConfig.randomizeStarType = false;  // We're setting it explicitly
+
+    switch (menuConfig.starType) {
+        case ui::WorldGenConfig::StarType::YELLOW_DWARF:
+            pwConfig.starType = StarType::sunLike();
+            break;
+
+        case ui::WorldGenConfig::StarType::RED_DWARF:
+            pwConfig.starType = StarType::redDwarf();
+            break;
+
+        case ui::WorldGenConfig::StarType::BLUE_GIANT:
+            pwConfig.starType = StarType::blueGiant();
+            break;
+
+        case ui::WorldGenConfig::StarType::BINARY:
+            pwConfig.starType = StarType::binarySystem();
+            break;
+
+        case ui::WorldGenConfig::StarType::ORANGE_DWARF: {
+            // Use fromSeed with bias toward K-class
+            uint32_t seed = menuConfig.useRandomSeed ? 0 : menuConfig.seed;
+            pwConfig.starType = StarType::fromSeed(seed);
+            pwConfig.starType.spectralClass = StarSpectralClass::K_ORANGE;
+            pwConfig.starType.color = glm::vec3(1.0f, 0.85f, 0.6f);
+            pwConfig.starType.intensity = 0.8f;
+            pwConfig.starType.temperature = 4500.0f;
+            pwConfig.starType.temperatureOffset = -5.0f;
+            break;
+        }
+    }
+
+    // ========================================================================
+    // World Structure
+    // ========================================================================
+    pwConfig.terrainScale = menuConfig.worldSize;
+    pwConfig.oceanCoverage = menuConfig.oceanCoverage;
+
+    // Island/region setup based on regionCount
+    if (menuConfig.regionCount > 1) {
+        pwConfig.islandShape = IslandShape::ARCHIPELAGO;
+        pwConfig.desiredRegionCount = menuConfig.regionCount;
+        pwConfig.multiRegion.enabled = true;
+
+        // Generate multi-region config from archipelago
+        uint32_t seed = menuConfig.useRandomSeed ? 0 : menuConfig.seed;
+        pwConfig.multiRegion = MultiRegionConfig::fromArchipelago(seed, menuConfig.regionCount);
+    } else {
+        pwConfig.islandShape = IslandShape::IRREGULAR;
+        pwConfig.desiredRegionCount = 1;
+        pwConfig.multiRegion.enabled = false;
+    }
+
+    pwConfig.generateRivers = true;
+    pwConfig.generateLakes = true;
+    pwConfig.generateCaves = true;
+
+    // ========================================================================
+    // Biome Weights
+    // ========================================================================
+    pwConfig.biomeWeights.forestWeight = menuConfig.forestWeight;
+    pwConfig.biomeWeights.grasslandWeight = menuConfig.grasslandWeight;
+    pwConfig.biomeWeights.desertWeight = menuConfig.desertWeight;
+    pwConfig.biomeWeights.tundraWeight = menuConfig.tundraWeight;
+    pwConfig.biomeWeights.wetlandWeight = menuConfig.wetlandWeight;
+    pwConfig.biomeWeights.mountainWeight = menuConfig.mountainWeight;
+    pwConfig.biomeWeights.volcanicWeight = menuConfig.volcanicWeight;
+
+    // ========================================================================
+    // Climate
+    // ========================================================================
+    pwConfig.temperatureBias = menuConfig.temperatureBias;
+    pwConfig.moistureBias = menuConfig.moistureBias;
+    pwConfig.seasonIntensity = menuConfig.seasonIntensity;
+
+    // ========================================================================
+    // Terrain Quality (can be set from settings)
+    // ========================================================================
+    pwConfig.erosionPasses = 2;
+    pwConfig.erosionStrength = 0.5f;
+    pwConfig.noiseOctaves = 6;
+    pwConfig.noiseFrequency = 1.0f;
+    // Keep generation responsive; consider exposing this as a quality slider.
+    pwConfig.heightmapResolution = 1024;
+
+    return pwConfig;
 }
 
 } // namespace ui

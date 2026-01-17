@@ -19,6 +19,7 @@ class Terrain;
 class SpatialGrid;
 class ClimateSystem;
 struct ClimateData;
+class BehaviorCoordinator;
 
 class Creature {
 public:
@@ -33,7 +34,8 @@ public:
     void update(float deltaTime, const Terrain& terrain, const std::vector<glm::vec3>& foodPositions,
                 const std::vector<Creature*>& otherCreatures, const SpatialGrid* spatialGrid = nullptr,
                 const EnvironmentConditions* envConditions = nullptr,
-                const std::vector<SoundEvent>* sounds = nullptr);
+                const std::vector<SoundEvent>* sounds = nullptr,
+                BehaviorCoordinator* behaviorCoordinator = nullptr);
     void render(uint32_t vaoHandle);
 
     bool isAlive() const { return alive; }
@@ -181,12 +183,27 @@ public:
     // Active check (creature manager pool compatibility)
     bool isActive() const { return alive; }
 
+    // Rotation stability diagnostics (Phase 11 - Agent 9)
+    float getAngularVelocity() const { return m_angularVelocity; }
+    float getMaxAngularVelocity() const { return m_maxAngularVelocity; }
+    float getRotationStability() const { return m_rotationStability; }
+    bool isSpinning() const { return m_spinningFrames > 3; }
+
 private:
     glm::vec3 position;
     glm::vec3 velocity;
     float rotation;
     glm::vec3 wanderTarget;  // For wander behavior persistence
     float m_wanderAngle;     // Per-instance wander angle for aquatic behavior (thread-safe)
+
+    // ========================================
+    // PHASE 11 - Agent 9: Rotation stability tracking
+    // ========================================
+    float m_angularVelocity = 0.0f;     // Radians per second
+    float m_lastRotation = 0.0f;        // For calculating angular velocity
+    float m_maxAngularVelocity = 0.0f;  // Peak angular velocity this lifetime (diagnostic)
+    float m_rotationStability = 1.0f;   // 0 = unstable spinning, 1 = stable
+    int m_spinningFrames = 0;           // Consecutive frames with high angular velocity
 
     Genome genome;
     genetics::DiploidGenome diploidGenome;  // New sophisticated genetic system
@@ -291,7 +308,8 @@ private:
 
     void updatePhysics(float deltaTime, const Terrain& terrain);
     void updateBehaviorHerbivore(float deltaTime, const std::vector<glm::vec3>& foodPositions,
-                                  const std::vector<Creature*>& otherCreatures, const SpatialGrid* grid);
+                                  const std::vector<Creature*>& otherCreatures, const SpatialGrid* grid,
+                                  BehaviorCoordinator* behaviorCoordinator = nullptr);
     void updateBehaviorCarnivore(float deltaTime, const std::vector<Creature*>& otherCreatures,
                                   const SpatialGrid* grid);
     void updateBehaviorAquatic(float deltaTime, const std::vector<Creature*>& otherCreatures,
@@ -306,6 +324,10 @@ private:
                               const std::vector<Creature*>& otherCreatures);
     void updatePhysiologicalState(float deltaTime);
     void calculateFitness();
+
+    // Phase 11 - Agent 9: Rotation stability helpers
+    void updateRotationSmooth(float targetRotation, float deltaTime, float maxTurnRate = 5.0f);
+    void updateRotationDiagnostics(float deltaTime);
 
     // Neural network integration
     std::vector<float> gatherNeuralInputs(const std::vector<glm::vec3>& foodPositions,

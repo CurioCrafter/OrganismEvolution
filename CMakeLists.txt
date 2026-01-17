@@ -115,15 +115,11 @@ set(IMPLOT_SOURCES
 # UI Dashboard Sources
 # =============================================================================
 
-# UI sources (disabled for minimal GPU steering demo build)
-# These have complex dependencies on genetics system
-# set(UI_SOURCES
-#     src/ui/DashboardMetrics.cpp
-#     src/ui/SimulationDashboard.cpp
-#     src/ui/NEATVisualizer.cpp
-#     src/ui/PhylogeneticTreeVisualizer.cpp
-# )
-set(UI_SOURCES)
+# UI sources (minimal set required by main.cpp)
+set(UI_SOURCES
+    src/ui/CreatureInspectionPanel.cpp
+    src/ui/MainMenu.cpp
+)
 
 # =============================================================================
 # AI / Neural Network Sources
@@ -204,6 +200,17 @@ set(ENTITY_SOURCES
     src/entities/NamePhonemeTables.cpp
     src/entities/SpeciesNaming.cpp
     src/entities/SpeciesNameGenerator.cpp
+    src/core/NamingValidation.cpp
+    # Behavior subsystem
+    src/entities/behaviors/BehaviorCoordinator.cpp
+    src/entities/behaviors/InterIslandMigration.cpp
+    src/entities/behaviors/InvasiveSpecies.cpp
+    src/entities/behaviors/MigrationBehavior.cpp
+    src/entities/behaviors/PackHunting.cpp
+    src/entities/behaviors/ParentalCare.cpp
+    src/entities/behaviors/SocialGroups.cpp
+    src/entities/behaviors/TerritorialBehavior.cpp
+    src/entities/behaviors/VarietyBehaviors.cpp
     # Genetics subsystem
     src/entities/genetics/Gene.cpp
     src/entities/genetics/Allele.cpp
@@ -213,6 +220,7 @@ set(ENTITY_SOURCES
     src/entities/genetics/HybridZone.cpp
     src/entities/genetics/MateSelector.cpp
     src/entities/genetics/GeneticsManager.cpp
+    src/entities/genetics/GenomeDiversitySystem.cpp
 )
 
 # =============================================================================
@@ -247,6 +255,7 @@ set(UTIL_SOURCES
 # =============================================================================
 
 set(ENVIRONMENT_SOURCES
+    src/environment/ArchipelagoGenerator.cpp
     src/environment/AquaticPlants.cpp
     src/environment/BiomePalette.cpp
     src/environment/BiomeSystem.cpp
@@ -256,10 +265,12 @@ set(ENVIRONMENT_SOURCES
     src/environment/EcosystemMetrics.cpp
     src/environment/Food.cpp
     src/environment/GrassSystem.cpp
+    src/environment/IslandGenerator.cpp
     src/environment/LSystem.cpp
     src/environment/PlanetChemistry.cpp
     src/environment/PlanetSeed.cpp
     src/environment/PlanetTheme.cpp
+    src/environment/ProceduralWorld.cpp
     src/environment/ProducerSystem.cpp
     src/environment/SeasonManager.cpp
     src/environment/Terrain.cpp
@@ -279,6 +290,7 @@ set(CORE_SOURCES
     src/core/CreatureUpdateScheduler.cpp
     src/core/FoodChainManager.cpp
     src/core/GameplayManager.cpp
+    src/core/MultiIslandManager.cpp
     src/core/ScanningSystem.cpp
     src/core/SpeciesCatalog.cpp
     # SimulationOrchestrator.cpp is disabled - not used by main.cpp

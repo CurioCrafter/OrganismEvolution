@@ -1,5 +1,6 @@
 #include "SpeciesNaming.h"
 #include "NamePhonemeTables.h"
+#include "CreatureType.h"
 #include <algorithm>
 #include <sstream>
 #include <cmath>
@@ -550,26 +551,73 @@ std::string SpeciesNamingSystem::generatePhonemeBasedName(
         m_stats.collisionsByTransform[result.transformsApplied]++;
     }
 
+    // GUARANTEE: Never return empty name - fallback to simple deterministic name
+    if (result.resolvedName.empty()) {
+        // Fallback: Generate simple name from species ID
+        std::string fallback = "Species-" + std::to_string(speciesId);
+
+        // Log the failure for debugging
+        std::cerr << "WARNING: Phoneme name generation failed for species " << speciesId
+                  << ", using fallback: " << fallback << std::endl;
+
+        return fallback;
+    }
+
     return result.resolvedName;
 }
 
 PhonemeTableType SpeciesNamingSystem::selectPhonemeTable(const CreatureTraits& traits) const {
-    // Select based on environment/traits
+    // Priority order: environment -> morphology -> diet -> default
+
+    // 1. AQUATIC CREATURES - highest priority
     if (traits.livesInWater || traits.hasFins) {
         return PhonemeTableType::OCEANIC;
     }
+
+    // 2. FLYING CREATURES
     if (traits.canFly || traits.hasWings) {
-        // Flying creatures use lush or alien tables
+        // Nocturnal flyers get alien names, diurnal get lush
         return (traits.isNocturnal) ? PhonemeTableType::ALIEN : PhonemeTableType::LUSH;
     }
+
+    // 3. BURROWING/UNDERGROUND CREATURES
     if (traits.burrows || traits.isSubterranean) {
         return PhonemeTableType::DRY;
     }
+
+    // 4. ARBOREAL CREATURES (live in trees)
     if (traits.isArboreal) {
         return PhonemeTableType::LUSH;
     }
 
-    // Use default biome
+    // 5. PREDATORS (if not already classified above)
+    if (traits.isPredator || traits.isCarnivore) {
+        // Large predators get volcanic (fierce), small predators get dry (harsh)
+        return (traits.size > 1.2f) ? PhonemeTableType::VOLCANIC : PhonemeTableType::DRY;
+    }
+
+    // 6. HERBIVORES (if not already classified above)
+    if (traits.isHerbivore) {
+        // Herbivores get lush (gentle, nature-themed)
+        return PhonemeTableType::LUSH;
+    }
+
+    // 7. NOCTURNAL CREATURES
+    if (traits.isNocturnal) {
+        return PhonemeTableType::ALIEN;
+    }
+
+    // 8. SIZE-BASED FALLBACK
+    if (traits.size < 0.5f) {
+        // Tiny creatures -> alien (exotic)
+        return PhonemeTableType::ALIEN;
+    }
+    if (traits.size > 1.8f) {
+        // Giant creatures -> volcanic (powerful)
+        return PhonemeTableType::VOLCANIC;
+    }
+
+    // 9. DEFAULT - use configured default biome
     return m_defaultBiome;
 }
 
@@ -588,6 +636,12 @@ std::string SpeciesNamingSystem::generateGenusName(uint32_t clusterId, PhonemeTa
     // Generate short name for genus (1-2 syllables, then truncate/modify)
     std::string baseName = phonemeTables.generateName(tableType, genusSeed, 1, 2);
 
+    // GUARANTEE: Never return empty name
+    if (baseName.empty()) {
+        // Fallback to simple genus name
+        baseName = "Genus" + std::to_string(clusterId);
+    }
+
     // Remove vowels at end if present and add genus-like ending
     if (!baseName.empty()) {
         char lastChar = baseName.back();
@@ -599,6 +653,9 @@ std::string SpeciesNamingSystem::generateGenusName(uint32_t clusterId, PhonemeTa
     // Ensure first letter is uppercase
     if (!baseName.empty()) {
         baseName[0] = static_cast<char>(std::toupper(baseName[0]));
+    } else {
+        // Double-check fallback
+        baseName = "Gen" + std::to_string(clusterId);
     }
 
     return baseName;
@@ -669,52 +726,103 @@ TraitDescriptor SpeciesNamingSystem::generateDescriptor(const CreatureTraits& tr
 std::string SpeciesNamingSystem::getDietString(const CreatureTraits& traits) {
     // NO "apex", "predator", or other generic labels
     // Use specific diet only
+    // GUARANTEED: Always returns a valid diet string (never empty)
+
+    // Aquatic carnivores
     if (traits.isCarnivore && traits.livesInWater) {
         return "piscivore";  // Fish-eater
     }
-    if (traits.isCarnivore) {
-        return "carnivore";
-    }
+
+    // Flying herbivores
     if (traits.isHerbivore && traits.canFly) {
         return "nectarivore";  // Nectar-feeder
     }
+
+    // Aquatic herbivores
     if (traits.isHerbivore && traits.livesInWater) {
         return "filter-feeder";
     }
-    if (traits.isHerbivore) {
-        return "herbivore";
+
+    // Terrestrial carnivores
+    if (traits.isCarnivore || traits.isPredator) {
+        // Differentiate by size for variety
+        if (traits.size < 0.7f) {
+            return "insectivore";  // Small predators eat insects
+        }
+        return "carnivore";
     }
+
+    // Omnivores
     if (traits.isOmnivore) {
         return "omnivore";
     }
 
-    // Default based on predator flag
-    if (traits.isPredator) {
-        return "carnivore";
+    // Herbivores
+    if (traits.isHerbivore) {
+        // Differentiate by habitat
+        if (traits.isArboreal) {
+            return "folivore";  // Leaf-eater
+        }
+        return "herbivore";
     }
 
+    // Scavengers (based on speed - slow creatures might scavenge)
+    if (traits.speed < 6.0f && !traits.isHerbivore) {
+        return "scavenger";
+    }
+
+    // FALLBACK: Default to herbivore (safest assumption)
     return "herbivore";
 }
 
 std::string SpeciesNamingSystem::getLocomotionString(const CreatureTraits& traits) {
+    // GUARANTEED: Always returns a valid locomotion string (never empty)
     // Prioritize most specific habitat/locomotion
+
+    // 1. AMPHIBIOUS (both water and air)
     if (traits.livesInWater && traits.canFly) {
         return "amphibious";
     }
+
+    // 2. AQUATIC
     if (traits.livesInWater) {
+        // Differentiate by depth preference for variety
+        if (traits.size > 1.5f) {
+            return "pelagic";  // Large aquatic creatures
+        }
         return "aquatic";
     }
+
+    // 3. AERIAL (flying creatures)
     if (traits.canFly) {
+        // Differentiate by behavior
+        if (traits.speed > 18.0f) {
+            return "volant";  // Fast flyers
+        }
         return "aerial";
     }
+
+    // 4. BURROWING
     if (traits.burrows || traits.isSubterranean) {
-        return "burrowing";
+        return "fossorial";  // Burrowing (scientific term)
     }
+
+    // 5. ARBOREAL (tree-dwelling)
     if (traits.isArboreal) {
         return "arboreal";
     }
 
-    // Ground-dwelling default
+    // 6. CURSORIAL (fast ground-dwelling)
+    if (traits.speed > 15.0f) {
+        return "cursorial";  // Fast runners
+    }
+
+    // 7. GROUND-DWELLING DEFAULT
+    if (traits.size < 0.5f) {
+        return "scansorial";  // Small climbers
+    }
+
+    // FALLBACK: Terrestrial (safest ground-dwelling default)
     return "terrestrial";
 }
 
@@ -801,6 +909,95 @@ float SpeciesNamingSystem::validateNameGeneration(int count, uint32_t testSeed) 
               << " collisions (" << collisionRate << "% rate)" << std::endl;
 
     return collisionRate;
+}
+
+// Validate naming coverage for all creature types
+SpeciesNamingSystem::CoverageTestResult SpeciesNamingSystem::validateCreatureTypeCoverage(uint32_t testSeed) const {
+    CoverageTestResult result;
+    std::stringstream report;
+
+    report << "=== Creature Type Naming Coverage Test ===\n\n";
+
+    // Test all 19 creature types
+    const std::vector<std::pair<int, std::string>> creatureTypes = {
+        {static_cast<int>(CreatureType::GRAZER), "GRAZER"},
+        {static_cast<int>(CreatureType::BROWSER), "BROWSER"},
+        {static_cast<int>(CreatureType::FRUGIVORE), "FRUGIVORE"},
+        {static_cast<int>(CreatureType::SMALL_PREDATOR), "SMALL_PREDATOR"},
+        {static_cast<int>(CreatureType::OMNIVORE), "OMNIVORE"},
+        {static_cast<int>(CreatureType::APEX_PREDATOR), "APEX_PREDATOR"},
+        {static_cast<int>(CreatureType::SCAVENGER), "SCAVENGER"},
+        {static_cast<int>(CreatureType::PARASITE), "PARASITE"},
+        {static_cast<int>(CreatureType::CLEANER), "CLEANER"},
+        {static_cast<int>(CreatureType::FLYING), "FLYING"},
+        {static_cast<int>(CreatureType::FLYING_BIRD), "FLYING_BIRD"},
+        {static_cast<int>(CreatureType::FLYING_INSECT), "FLYING_INSECT"},
+        {static_cast<int>(CreatureType::AERIAL_PREDATOR), "AERIAL_PREDATOR"},
+        {static_cast<int>(CreatureType::AQUATIC), "AQUATIC"},
+        {static_cast<int>(CreatureType::AQUATIC_HERBIVORE), "AQUATIC_HERBIVORE"},
+        {static_cast<int>(CreatureType::AQUATIC_PREDATOR), "AQUATIC_PREDATOR"},
+        {static_cast<int>(CreatureType::AQUATIC_APEX), "AQUATIC_APEX"},
+        {static_cast<int>(CreatureType::AMPHIBIAN), "AMPHIBIAN"}
+    };
+
+    for (const auto& [typeValue, typeName] : creatureTypes) {
+        result.totalTypesTested++;
+
+        // Build test traits for this creature type
+        CreatureTraits traits;
+        traits.size = 1.0f;
+        traits.speed = 10.0f;
+
+        // Set traits based on type
+        CreatureType type = static_cast<CreatureType>(typeValue);
+        if (::isHerbivore(type)) {
+            traits.isHerbivore = true;
+            traits.isCarnivore = false;
+            traits.isPredator = false;
+        } else if (::isPredator(type)) {
+            traits.isPredator = true;
+            traits.isCarnivore = true;
+            traits.isHerbivore = false;
+        }
+
+        traits.canFly = ::isFlying(type);
+        traits.livesInWater = ::isAquatic(type);
+        traits.hasWings = traits.canFly;
+        traits.hasFins = traits.livesInWater;
+
+        // Generate name
+        genetics::SpeciesId speciesId = testSeed + result.totalTypesTested;
+        const SpeciesName& name = getOrCreateSpeciesNameDeterministic(speciesId, traits, testSeed, PhonemeTableType::LUSH);
+
+        // Validate name
+        bool hasCommonName = !name.commonName.empty();
+        bool hasDescriptor = !name.descriptor.getFullDescriptor().empty();
+
+        if (hasCommonName) result.successfulNames++;
+        else result.emptyNames++;
+
+        if (!hasDescriptor) result.emptyDescriptors++;
+
+        // Report entry
+        report << typeName << ":\n";
+        report << "  Common Name: " << (hasCommonName ? name.commonName : "[EMPTY]") << "\n";
+        report << "  Scientific: " << name.scientificName << "\n";
+        report << "  Descriptor: " << (hasDescriptor ? name.descriptor.getFullDescriptor() : "[EMPTY]") << "\n";
+        report << "  Status: " << (hasCommonName && hasDescriptor ? "✓ PASS" : "✗ FAIL") << "\n\n";
+    }
+
+    report << "=== Summary ===\n";
+    report << "Total Types Tested: " << result.totalTypesTested << "\n";
+    report << "Successful Names: " << result.successfulNames << "\n";
+    report << "Empty Names: " << result.emptyNames << "\n";
+    report << "Empty Descriptors: " << result.emptyDescriptors << "\n";
+
+    float successRate = result.totalTypesTested > 0 ?
+        static_cast<float>(result.successfulNames) / static_cast<float>(result.totalTypesTested) * 100.0f : 0.0f;
+    report << "Success Rate: " << successRate << "%\n";
+
+    result.report = report.str();
+    return result;
 }
 
 const SpeciesName* SpeciesNamingSystem::getSpeciesName(genetics::SpeciesId speciesId) const {

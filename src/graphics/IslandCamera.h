@@ -165,6 +165,20 @@ public:
     void clearBookmarks() { m_bookmarks.clear(); }
 
     // ========================================================================
+    // Cinematic Mode
+    // ========================================================================
+
+    // Start cinematic camera (smooth orbit around archipelago)
+    void startCinematicMode(const MultiIslandManager& islands);
+    void stopCinematicMode();
+    bool isCinematicMode() const { return m_mode == IslandCameraMode::CINEMATIC; }
+
+    // Configure cinematic parameters
+    void setCinematicSpeed(float speed) { m_cinematicSpeed = speed; }
+    void setCinematicOrbitRadius(float radius) { m_cinematicOrbitRadius = radius; }
+    void setCinematicHeight(float height) { m_cinematicHeight = height; }
+
+    // ========================================================================
     // Callbacks
     // ========================================================================
 
@@ -226,11 +240,19 @@ private:
     glm::vec3 m_preOverviewTarget;
     bool m_inOverview = false;
 
+    // Cinematic mode state
+    float m_cinematicTime = 0.0f;
+    float m_cinematicSpeed = 0.05f;        // Radians per second
+    float m_cinematicOrbitRadius = 400.0f;
+    float m_cinematicHeight = 200.0f;
+    glm::vec3 m_cinematicCenter;
+
     // Internal methods
     void updateIslandView(float deltaTime);
     void updateOverview(float deltaTime);
     void updateTransition(float deltaTime);
     void updateFollowing(float deltaTime);
+    void updateCinematic(float deltaTime);
 
     void startTransition(const glm::vec3& targetPos, const glm::vec3& targetTarget, float duration);
     void completeTransition();

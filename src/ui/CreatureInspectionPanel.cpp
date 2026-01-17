@@ -348,7 +348,7 @@ void CreatureInspectionPanel::renderIdentitySection(Creature* c) {
 
     // Species ID (if available)
     auto speciesId = c->getSpeciesId();
-    if (speciesId != genetics::INVALID_SPECIES_ID) {
+    if (speciesId != 0) {
         ImGui::Text("Species ID: %u", speciesId);
     }
 }
@@ -369,9 +369,7 @@ void CreatureInspectionPanel::renderBiologySection(Creature* c) {
         ImGui::Text("Age: %d:%02d", minutes, seconds);
     }
 
-    // Sex (determined by genome if applicable)
-    bool isFemale = (g.sex == 0);  // Assuming 0 = female, 1 = male
-    ImGui::Text("Sex: %s", isFemale ? "Female" : "Male");
+    ImGui::Text("Sex: N/A");
 
     // Chemistry affinity (diet preference)
     const char* dietStr;
@@ -456,6 +454,62 @@ void CreatureInspectionPanel::renderStatusSection(Creature* c) {
     // Fitness
     ImGui::Text("Fitness: %.2f", c->getFitness());
 
+    ImGui::Separator();
+
+    // Activity state badge
+    const char* activity = getActivityStateString(c);
+    ImVec4 activityColor;
+    if (c->isBeingHunted()) {
+        activityColor = ImVec4(1.0f, 0.3f, 0.3f, 1.0f);  // Red for fleeing
+    } else if (c->isMigrating()) {
+        activityColor = ImVec4(0.5f, 0.8f, 1.0f, 1.0f);  // Blue for migrating
+    } else if (glm::length(c->getVelocity()) > 5.0f) {
+        activityColor = ImVec4(1.0f, 0.8f, 0.3f, 1.0f);  // Orange for running
+    } else if (glm::length(c->getVelocity()) < 0.5f) {
+        activityColor = ImVec4(0.6f, 0.6f, 0.6f, 1.0f);  // Gray for resting
+    } else {
+        activityColor = ImVec4(0.3f, 0.8f, 0.3f, 1.0f);  // Green for wandering
+    }
+
+    ImGui::Text("Activity:");
+    ImGui::SameLine();
+    ImGui::PushStyleColor(ImGuiCol_Button, activityColor);
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, activityColor);
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive, activityColor);
+    ImGui::Button(activity, ImVec2(120, 0));
+    ImGui::PopStyleColor(3);
+
+    // Behavior state badge
+    ImGui::Text("Behavior:");
+    ImGui::SameLine();
+
+    const char* behavior;
+    ImVec4 behaviorColor;
+    if (c->isBeingHunted()) {
+        behavior = "FLEEING";
+        behaviorColor = ImVec4(1.0f, 0.3f, 0.3f, 1.0f);
+    } else if (c->getEnergy() < c->getMaxEnergy() * 0.3f) {
+        behavior = "Seeking Food";
+        behaviorColor = ImVec4(0.9f, 0.6f, 0.2f, 1.0f);
+    } else if (c->canReproduce()) {
+        behavior = "Seeking Mate";
+        behaviorColor = ImVec4(0.9f, 0.5f, 0.9f, 1.0f);
+    } else if (c->isMigrating()) {
+        behavior = "Migrating";
+        behaviorColor = ImVec4(0.5f, 0.8f, 1.0f, 1.0f);
+    } else {
+        behavior = "Exploring";
+        behaviorColor = ImVec4(0.3f, 0.8f, 0.3f, 1.0f);
+    }
+
+    ImGui::PushStyleColor(ImGuiCol_Button, behaviorColor);
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, behaviorColor);
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive, behaviorColor);
+    ImGui::Button(behavior, ImVec2(120, 0));
+    ImGui::PopStyleColor(3);
+
+    ImGui::Separator();
+
     // Fear level (for prey)
     if (c->getType() == CreatureType::HERBIVORE || c->getType() == CreatureType::AQUATIC) {
         float fear = c->getFear();
@@ -471,18 +525,9 @@ void CreatureInspectionPanel::renderStatusSection(Creature* c) {
         ImGui::Text("Kills: %d", c->getKillCount());
     }
 
-    // Activity state
-    const char* activity = getActivityStateString(c);
-    ImGui::Text("Activity: %s", activity);
-
     // Hunting status
     if (c->isBeingHunted()) {
         ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), "WARNING: Being Hunted!");
-    }
-
-    // Migration status
-    if (c->isMigrating()) {
-        ImGui::TextColored(ImVec4(0.5f, 0.8f, 1.0f, 1.0f), "Migrating");
     }
 
     // Climate stress
@@ -538,8 +583,8 @@ void CreatureInspectionPanel::renderGeneticsSection(Creature* c) {
     ImGui::Text("Speed: %.3f", g.speed);
     ImGui::Text("Vision Range: %.3f", g.visionRange);
     ImGui::Text("Efficiency: %.3f", g.efficiency);
-    ImGui::Text("Aggression: %.3f", g.aggression);
-    ImGui::Text("Social Tendency: %.3f", g.socialTendency);
+    ImGui::Text("Display Intensity: %.3f", g.displayIntensity);
+    ImGui::Text("Memory Capacity: %.3f", g.memoryCapacity);
     ImGui::Unindent();
 
     ImGui::Separator();
@@ -549,26 +594,19 @@ void CreatureInspectionPanel::renderGeneticsSection(Creature* c) {
     ImGui::ColorEdit3("Base Color", (float*)&g.color, ImGuiColorEditFlags_NoInputs);
     ImGui::Unindent();
 
-    // Mutation rate
-    ImGui::Separator();
-    ImGui::Text("Mutation Rate: %.1f%%", g.mutationRate * 100.0f);
-
     // Diploid genome info
     const auto& diploid = c->getDiploidGenome();
     ImGui::Separator();
     ImGui::Text("Diploid Genome:");
     ImGui::Indent();
-    ImGui::Text("Total Genes: %zu", diploid.getGeneCount());
+    ImGui::Text("Chromosome Pairs: %zu", diploid.getChromosomeCount());
     ImGui::Unindent();
 }
 
 void CreatureInspectionPanel::renderBrainSection(Creature* c) {
-    const auto& sensory = c->getSensory();
-
     ImGui::Text("Sensory System:");
     ImGui::Indent();
     ImGui::Text("Vision Range: %.1f", c->getVisionRange());
-    ImGui::Text("Detection Radius: %.1f", sensory.detectionRadius);
     ImGui::Unindent();
 
     ImGui::Separator();
@@ -682,30 +720,14 @@ std::string CreatureInspectionPanel::getBiomeNameAtCreature(Creature* c) const {
     const glm::vec3& pos = c->getPosition();
     BiomeType biome = m_biomeSystem->getBiomeAt(pos.x, pos.z);
 
-    switch (biome) {
-        case BiomeType::TROPICAL_FOREST: return "Tropical Forest";
-        case BiomeType::TEMPERATE_FOREST: return "Temperate Forest";
-        case BiomeType::GRASSLAND: return "Grassland";
-        case BiomeType::SAVANNA: return "Savanna";
-        case BiomeType::DESERT: return "Desert";
-        case BiomeType::TUNDRA: return "Tundra";
-        case BiomeType::VOLCANIC: return "Volcanic";
-        case BiomeType::COASTAL: return "Coastal";
-        case BiomeType::WETLAND: return "Wetland";
-        case BiomeType::ALPINE: return "Alpine";
-        case BiomeType::OCEAN: return "Ocean";
-        case BiomeType::DEEP_OCEAN: return "Deep Ocean";
-        case BiomeType::CORAL_REEF: return "Coral Reef";
-        case BiomeType::KELP_FOREST: return "Kelp Forest";
-        default: return "Unknown";
-    }
+    return m_biomeSystem->getBiomeName(biome);
 }
 
 ImVec4 CreatureInspectionPanel::getSpeciesSimilarityColor(Creature* c) const {
     // Generate a color based on species ID for visual distinction
     auto speciesId = c->getSpeciesId();
 
-    if (speciesId == genetics::INVALID_SPECIES_ID) {
+    if (speciesId == 0) {
         return ImVec4(0.5f, 0.5f, 0.5f, 1.0f);  // Gray for unknown
     }
 

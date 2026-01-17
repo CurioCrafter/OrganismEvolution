@@ -7,6 +7,8 @@
 #include <cstring>
 #include <iostream>
 #include <cassert>
+#include <iomanip>
+#include <unordered_map>
 
 // ============================================================================
 // Utility Functions
@@ -477,7 +479,7 @@ void BiomeSystem::generateBiomeMap(const std::vector<float>& heightmap, int widt
 
     // Second pass: determine biomes based on environmental factors
     std::mt19937 rng(seed);
-    std::uniform_real_distribution<float> noise(-0.1f, 0.1f);
+    std::uniform_real_distribution<float> localNoise(-0.1f, 0.1f);
 
     for (int y = 0; y < height; ++y) {
         for (int x = 0; x < width; ++x) {
@@ -487,10 +489,21 @@ void BiomeSystem::generateBiomeMap(const std::vector<float>& heightmap, int widt
             float h = heightmap[idx];
             float slope = calculateSlope(heightmap, x, y, width);
             float latitude = (static_cast<float>(y) / height) * 2.0f - 1.0f; // -1 to 1
-            float localNoise = noise(rng);
 
-            float temp = calculateTemperature(h, latitude, localNoise);
-            float moist = calculateMoisture(h, m_distanceToWaterMap[idx], localNoise);
+            // PHASE 11 AGENT 3: Add multi-scale patch noise for biome variety
+            // This creates distinct biome patches instead of uniform climate zones
+            float patchNoise = generatePatchNoise(static_cast<float>(x), static_cast<float>(y), seed);
+
+            // Local fine-grain variation
+            float fineNoise = localNoise(rng);
+
+            // Apply patch noise to temperature and moisture with increased strength
+            // This forces multiple distinct biomes per island instead of mono-biome collapse
+            float tempOffset = patchNoise * 0.6f + fineNoise;  // Increased from 0.1 to 0.6
+            float moistOffset = generatePatchNoise(static_cast<float>(x) + 1000.0f, static_cast<float>(y), seed + 7919) * 0.5f + fineNoise;
+
+            float temp = calculateTemperature(h, latitude, tempOffset);
+            float moist = calculateMoisture(h, m_distanceToWaterMap[idx], moistOffset);
 
             // Store environmental factors
             cell.elevation = h;
@@ -510,8 +523,9 @@ void BiomeSystem::generateBiomeMap(const std::vector<float>& heightmap, int widt
         }
     }
 
-    // Smooth transitions between biomes
-    smoothTransitions(2);
+    // PHASE 11 AGENT 3: Reduced smoothing iterations to preserve biome patches
+    // Changed from 2 to 1 to maintain more distinct biome boundaries
+    smoothTransitions(1);
     calculateBlendFactors();
 }
 
@@ -904,11 +918,13 @@ void BiomeSystem::smoothTransitions(int iterations) {
                     }
                 }
 
-                // If surrounded by different biome, consider transition
-                if (maxCount >= 5) {
+                // PHASE 11 AGENT 3: Increased threshold to preserve more biome variety
+                // Changed from 5 to 7 - only replace truly isolated single cells
+                // This prevents aggressive biome homogenization
+                if (maxCount >= 7) {
                     // Check if this is an isolated cell - replace it
                     int selfCount = neighborCounts[cell.primaryBiome];
-                    if (selfCount <= 2) {
+                    if (selfCount == 0) {  // Only if completely surrounded (changed from <= 2)
                         cell.primaryBiome = mostCommon;
                         const BiomeProperties& props = getProperties(mostCommon);
                         cell.color = props.baseColor;
@@ -1379,4 +1395,207 @@ std::string BiomeSystem::getBiomeName(BiomeType type) const {
         return it->second.name;
     }
     return biomeToString(type);
+}
+
+// ============================================================================
+// PHASE 11 AGENT 3: Patch Noise and Biome Diversity
+// ============================================================================
+
+// Simple hash function for noise generation
+static uint32_t hash(uint32_t x, uint32_t y, uint32_t seed) {
+    uint32_t h = seed;
+    h ^= x * 0x85ebca6b;
+    h ^= y * 0xc2b2ae35;
+    h ^= h >> 16;
+    h *= 0x7feb352d;
+    h ^= h >> 15;
+    h *= 0x846ca68b;
+    h ^= h >> 16;
+    return h;
+}
+
+// Smooth interpolation (smoothstep)
+static float smoothstep(float t) {
+    return t * t * (3.0f - 2.0f * t);
+}
+
+// Perlin-style noise implementation
+float BiomeSystem::perlinNoise(float x, float y, uint32_t seed) const {
+    int x0 = static_cast<int>(std::floor(x));
+    int y0 = static_cast<int>(std::floor(y));
+    int x1 = x0 + 1;
+    int y1 = y0 + 1;
+
+    float fx = x - x0;
+    float fy = y - y0;
+
+    // Hash corner coordinates to get pseudo-random values
+    float h00 = static_cast<float>(hash(x0, y0, seed) & 0xFFFF) / 65535.0f;
+    float h10 = static_cast<float>(hash(x1, y0, seed) & 0xFFFF) / 65535.0f;
+    float h01 = static_cast<float>(hash(x0, y1, seed) & 0xFFFF) / 65535.0f;
+    float h11 = static_cast<float>(hash(x1, y1, seed) & 0xFFFF) / 65535.0f;
+
+    // Bilinear interpolation with smoothstep
+    float sx = smoothstep(fx);
+    float sy = smoothstep(fy);
+
+    float nx0 = glm::mix(h00, h10, sx);
+    float nx1 = glm::mix(h01, h11, sx);
+
+    return glm::mix(nx0, nx1, sy) * 2.0f - 1.0f; // Range -1 to 1
+}
+
+// Multi-octave patch noise for biome variety
+float BiomeSystem::generatePatchNoise(float x, float y, uint32_t seed) const {
+    float result = 0.0f;
+    float amplitude = 1.0f;
+    float frequency = 0.02f;  // Low frequency = large patches
+    float totalAmplitude = 0.0f;
+
+    // 3 octaves for natural-looking patches
+    for (int octave = 0; octave < 3; ++octave) {
+        result += perlinNoise(x * frequency, y * frequency, seed + octave * 1000) * amplitude;
+        totalAmplitude += amplitude;
+        amplitude *= 0.5f;
+        frequency *= 2.0f;
+    }
+
+    return result / totalAmplitude;  // Normalize to -1 to 1 range
+}
+
+// Calculate biome diversity metrics using flood-fill for patch detection
+BiomeSystem::BiomeDiversityMetrics BiomeSystem::calculateDiversityMetrics() const {
+    BiomeDiversityMetrics metrics;
+
+    if (m_biomeMap.empty()) {
+        return metrics;
+    }
+
+    // Count biome occurrences (excluding water biomes for terrestrial diversity)
+    std::unordered_map<BiomeType, int> biomeCountMap;
+    int terrestrialCells = 0;
+
+    for (const auto& cell : m_biomeMap) {
+        BiomeType biome = cell.primaryBiome;
+
+        // Skip deep water biomes for terrestrial diversity calculation
+        if (!isAquaticBiome(biome) || biome == BiomeType::SHALLOW_WATER) {
+            biomeCountMap[biome]++;
+            terrestrialCells++;
+        }
+    }
+
+    metrics.totalBiomeCount = static_cast<int>(biomeCountMap.size());
+    metrics.biomeCounts.reserve(biomeCountMap.size());
+
+    for (const auto& pair : biomeCountMap) {
+        metrics.biomeCounts.push_back(pair.second);
+    }
+
+    // Calculate Shannon diversity index: H = -Σ(p_i * ln(p_i))
+    metrics.diversityIndex = 0.0f;
+    if (terrestrialCells > 0) {
+        for (int count : metrics.biomeCounts) {
+            float p = static_cast<float>(count) / terrestrialCells;
+            if (p > 0.0f) {
+                metrics.diversityIndex -= p * std::log(p);
+            }
+        }
+    }
+
+    // Find largest contiguous patch using flood fill
+    std::vector<bool> visited(m_biomeMap.size(), false);
+    metrics.largestPatchSize = 0;
+
+    for (int y = 0; y < m_height; ++y) {
+        for (int x = 0; x < m_width; ++x) {
+            int idx = y * m_width + x;
+            if (visited[idx]) continue;
+
+            BiomeType biome = m_biomeMap[idx].primaryBiome;
+            if (isAquaticBiome(biome) && biome != BiomeType::SHALLOW_WATER) {
+                visited[idx] = true;
+                continue;
+            }
+
+            // Flood fill to find patch size
+            std::queue<std::pair<int, int>> queue;
+            queue.push({x, y});
+            visited[idx] = true;
+            int patchSize = 0;
+
+            while (!queue.empty()) {
+                auto [cx, cy] = queue.front();
+                queue.pop();
+                patchSize++;
+
+                // Check 4-connected neighbors
+                const int dx[] = {0, 0, -1, 1};
+                const int dy[] = {-1, 1, 0, 0};
+
+                for (int i = 0; i < 4; ++i) {
+                    int nx = cx + dx[i];
+                    int ny = cy + dy[i];
+
+                    if (nx >= 0 && nx < m_width && ny >= 0 && ny < m_height) {
+                        int nidx = ny * m_width + nx;
+                        if (!visited[nidx] && m_biomeMap[nidx].primaryBiome == biome) {
+                            visited[nidx] = true;
+                            queue.push({nx, ny});
+                        }
+                    }
+                }
+            }
+
+            metrics.patchSizes.push_back(patchSize);
+            if (patchSize > metrics.largestPatchSize) {
+                metrics.largestPatchSize = patchSize;
+            }
+        }
+    }
+
+    // Calculate dominance (largest patch as fraction of total)
+    if (terrestrialCells > 0) {
+        metrics.dominance = static_cast<float>(metrics.largestPatchSize) / terrestrialCells;
+    }
+
+    return metrics;
+}
+
+// Log diversity metrics for validation
+void BiomeSystem::logDiversityMetrics() const {
+    auto metrics = calculateDiversityMetrics();
+
+    std::cout << "\n=== BIOME DIVERSITY METRICS (PHASE 11 AGENT 3) ===" << std::endl;
+    std::cout << "Total distinct biomes: " << metrics.totalBiomeCount << std::endl;
+    std::cout << "Largest patch size: " << metrics.largestPatchSize << " cells" << std::endl;
+    std::cout << "Total patches: " << metrics.patchSizes.size() << std::endl;
+    std::cout << "Shannon diversity index: " << std::fixed << std::setprecision(3)
+              << metrics.diversityIndex << std::endl;
+    std::cout << "Dominance (largest patch ratio): " << std::fixed << std::setprecision(3)
+              << metrics.dominance << std::endl;
+
+    // Log biome distribution
+    std::unordered_map<BiomeType, int> biomeCountMap;
+    int totalCells = 0;
+    for (const auto& cell : m_biomeMap) {
+        if (!isAquaticBiome(cell.primaryBiome) || cell.primaryBiome == BiomeType::SHALLOW_WATER) {
+            biomeCountMap[cell.primaryBiome]++;
+            totalCells++;
+        }
+    }
+
+    std::cout << "\nBiome coverage:" << std::endl;
+    std::vector<std::pair<BiomeType, int>> sorted(biomeCountMap.begin(), biomeCountMap.end());
+    std::sort(sorted.begin(), sorted.end(), [](const auto& a, const auto& b) {
+        return a.second > b.second;
+    });
+
+    for (const auto& [biome, count] : sorted) {
+        float percentage = (totalCells > 0) ? (100.0f * count / totalCells) : 0.0f;
+        std::cout << "  " << std::setw(25) << std::left << biomeToString(biome)
+                  << ": " << std::setw(6) << std::right << count
+                  << " cells (" << std::fixed << std::setprecision(1) << percentage << "%)" << std::endl;
+    }
+    std::cout << "======================================\n" << std::endl;
 }

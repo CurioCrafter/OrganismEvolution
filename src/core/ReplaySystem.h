@@ -39,6 +39,10 @@ struct CreatureSnapshot {
     float genomeSize = 1.0f;
     float genomeVision = 50.0f;
 
+    // Behavior tracking (Phase 10 Agent 7: for replay visualization)
+    float age = 0.0f;           // Creature age for replay UI display
+    int32_t generation = 1;     // Generation number for replay stats
+
     // Neural network weights (S-07 fix: include brain state)
     // Stored as compact vectors for serialization
     std::vector<float> neuralWeightsIH;  // Input->Hidden weights
@@ -65,6 +69,10 @@ struct CreatureSnapshot {
         writer.write(genomeSpeed);
         writer.write(genomeSize);
         writer.write(genomeVision);
+
+        // Write behavior tracking (Phase 10 Agent 7)
+        writer.write(age);
+        writer.write(generation);
 
         // Write neural network weights (variable size)
         writer.write(static_cast<uint32_t>(neuralWeightsIH.size()));
@@ -99,6 +107,10 @@ struct CreatureSnapshot {
         genomeSpeed = reader.read<float>();
         genomeSize = reader.read<float>();
         genomeVision = reader.read<float>();
+
+        // Read behavior tracking (Phase 10 Agent 7)
+        age = reader.read<float>();
+        generation = reader.read<int32_t>();
 
         // Read neural network weights
         uint32_t ihSize = reader.read<uint32_t>();

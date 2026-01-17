@@ -218,16 +218,17 @@ void SimulationDashboard::renderRightPanel(
     Camera& camera
 ) {
     ImGuiViewport* viewport = ImGui::GetMainViewport();
-    float panelWidth = 300.0f;
+    float panelWidth = 350.0f;  // Increased from 300 for better visibility
 
     ImGui::SetNextWindowPos(
         ImVec2(viewport->Pos.x + viewport->Size.x - panelWidth - 10, viewport->Pos.y + 10),
         ImGuiCond_FirstUseEver
     );
-    ImGui::SetNextWindowSize(ImVec2(panelWidth, 500), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(panelWidth, 700), ImGuiCond_FirstUseEver);  // Increased from 500
 
-    if (ImGui::Begin("Creature Inspector", nullptr, ImGuiWindowFlags_NoCollapse)) {
-        renderCreatureInspector(creatures);
+    if (ImGui::Begin("Creature List", nullptr, ImGuiWindowFlags_NoCollapse)) {
+        // Phase 11: Always show creature list, selection shown in detail if clicked
+        renderCreatureList(creatures);
     }
     ImGui::End();
 }
@@ -921,36 +922,187 @@ void SimulationDashboard::renderCreatureInspector(std::vector<std::unique_ptr<Cr
 }
 
 void SimulationDashboard::renderCreatureList(std::vector<std::unique_ptr<Creature>>& creatures) {
-    // Sort creatures by fitness
-    std::vector<std::pair<float, Creature*>> sorted;
+    // Phase 11: Enhanced creature list with filtering, search, and better display
+
+    // Header with stats
+    int totalCount = 0;
     for (auto& c : creatures) {
-        if (c && c->isAlive()) {
-            sorted.push_back({c->getFitness(), c.get()});
-        }
+        if (c && c->isAlive()) totalCount++;
     }
 
-    std::sort(sorted.begin(), sorted.end(),
-             [](const auto& a, const auto& b) { return a.first > b.first; });
+    ImGui::Text("Creatures: %d", totalCount);
+    ImGui::Separator();
 
-    // Show top 15
-    int count = std::min((int)sorted.size(), 15);
+    // Search box
+    ImGui::SetNextItemWidth(-1);
+    ImGui::InputTextWithHint("##search", "Search by name...", m_creatureSearchBuffer, sizeof(m_creatureSearchBuffer));
 
-    ImGui::BeginChild("CreatureList", ImVec2(-1, 200), true);
+    // Filter toggles (compact horizontal layout)
+    ImGui::Text("Filter:");
+    ImGui::SameLine();
+    ImGui::Checkbox("H##herb", &m_filterByHerbivore);
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Herbivores");
+    ImGui::SameLine();
+    ImGui::Checkbox("C##carn", &m_filterByCarnivore);
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Carnivores");
+    ImGui::SameLine();
+    ImGui::Checkbox("A##aqua", &m_filterByAquatic);
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Aquatic");
+    ImGui::SameLine();
+    ImGui::Checkbox("F##fly", &m_filterByFlying);
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Flying");
 
-    for (int i = 0; i < count; ++i) {
-        Creature* c = sorted[i].second;
-        const char* typeStr = c->getType() == CreatureType::HERBIVORE ? "H" : "C";
+    // Sort mode
+    ImGui::Text("Sort:");
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(-1);
+    const char* sortModes[] = { "Fitness", "Name", "Distance", "Energy", "Age" };
+    ImGui::Combo("##sort", &m_sortMode, sortModes, 5);
+
+    ImGui::Separator();
+
+    // Filter and collect creatures
+    std::vector<Creature*> filtered;
+    std::string searchStr = m_creatureSearchBuffer;
+    std::transform(searchStr.begin(), searchStr.end(), searchStr.begin(), ::tolower);
+
+    for (auto& c : creatures) {
+        if (!c || !c->isAlive()) continue;
+
+        // Type filter
+        CreatureType type = c->getType();
+        if (type == CreatureType::HERBIVORE && !m_filterByHerbivore) continue;
+        if (type == CreatureType::CARNIVORE && !m_filterByCarnivore) continue;
+        if (type == CreatureType::AQUATIC && !m_filterByAquatic) continue;
+        if (type == CreatureType::FLYING && !m_filterByFlying) continue;
+
+        // Search filter
+        if (searchStr.length() > 0) {
+            std::string name = c->getSpeciesDisplayName();
+            std::transform(name.begin(), name.end(), name.begin(), ::tolower);
+            if (name.find(searchStr) == std::string::npos) continue;
+        }
+
+        filtered.push_back(c.get());
+    }
+
+    // Sort filtered list
+    if (m_sortMode == 0) {
+        // Fitness (descending)
+        std::sort(filtered.begin(), filtered.end(),
+                 [](Creature* a, Creature* b) { return a->getFitness() > b->getFitness(); });
+    } else if (m_sortMode == 1) {
+        // Name (ascending)
+        std::sort(filtered.begin(), filtered.end(),
+                 [](Creature* a, Creature* b) { return a->getSpeciesDisplayName() < b->getSpeciesDisplayName(); });
+    } else if (m_sortMode == 2) {
+        // Distance (ascending, requires camera - placeholder for now)
+        std::sort(filtered.begin(), filtered.end(),
+                 [](Creature* a, Creature* b) { return a->getID() < b->getID(); });
+    } else if (m_sortMode == 3) {
+        // Energy (descending)
+        std::sort(filtered.begin(), filtered.end(),
+                 [](Creature* a, Creature* b) { return a->getEnergy() > b->getEnergy(); });
+    } else if (m_sortMode == 4) {
+        // Age (descending)
+        std::sort(filtered.begin(), filtered.end(),
+                 [](Creature* a, Creature* b) { return a->getAge() > b->getAge(); });
+    }
+
+    // Display count
+    ImGui::Text("Showing: %d / %d", (int)filtered.size(), totalCount);
+
+    // Scrollable list (fill remaining space)
+    ImGui::BeginChild("CreatureListScroll", ImVec2(-1, -1), true);
+
+    for (Creature* c : filtered) {
+        ImGui::PushID(c->getID());
 
         bool isSelected = (c == m_selectedCreature);
 
-        char label[64];
-        snprintf(label, sizeof(label), "%s #%d - Fit:%.1f Gen:%d",
-                typeStr, c->getID(), c->getFitness(), c->getGeneration());
+        // Type icon with color
+        const char* typeIcon;
+        ImVec4 typeColor;
+        switch (c->getType()) {
+            case CreatureType::HERBIVORE:
+                typeIcon = "[H]";
+                typeColor = ImVec4(0.3f, 0.8f, 0.3f, 1.0f);
+                break;
+            case CreatureType::CARNIVORE:
+                typeIcon = "[C]";
+                typeColor = ImVec4(0.9f, 0.3f, 0.3f, 1.0f);
+                break;
+            case CreatureType::AQUATIC:
+                typeIcon = "[A]";
+                typeColor = ImVec4(0.3f, 0.6f, 0.9f, 1.0f);
+                break;
+            case CreatureType::FLYING:
+                typeIcon = "[F]";
+                typeColor = ImVec4(0.7f, 0.7f, 0.3f, 1.0f);
+                break;
+            default:
+                typeIcon = "[?]";
+                typeColor = ImVec4(0.5f, 0.5f, 0.5f, 1.0f);
+        }
 
+        // Species name (or ID if no name)
+        std::string displayName = c->getSpeciesDisplayName();
+        if (displayName.empty()) {
+            displayName = "Creature #" + std::to_string(c->getID());
+        }
+
+        // Build label with more info
+        char label[256];
+        snprintf(label, sizeof(label), "%s %s##%d", typeIcon, displayName.c_str(), c->getID());
+
+        // Selectable item
         if (ImGui::Selectable(label, isSelected)) {
             m_selectedCreature = c;
             m_selectedCreatureId = c->getID();
+
+            // Update inspection panel and selection system
+            m_inspectionPanel.setInspectedCreature(c);
+            m_selectionSystem.setSelectedCreature(c);
         }
+
+        // Show tooltip with detailed info on hover
+        if (ImGui::IsItemHovered()) {
+            ImGui::BeginTooltip();
+            ImGui::Text("ID: %d", c->getID());
+            ImGui::TextColored(typeColor, "Type: %s", typeIcon);
+            ImGui::Text("Energy: %.0f / %.0f", c->getEnergy(), c->getMaxEnergy());
+            ImGui::Text("Age: %.1fs", c->getAge());
+            ImGui::Text("Fitness: %.2f", c->getFitness());
+            ImGui::Text("Generation: %d", c->getGeneration());
+            ImGui::Separator();
+            ImGui::Text("Click to select and inspect");
+            ImGui::EndTooltip();
+        }
+
+        // Additional stats on same line (compact)
+        if (isSelected) {
+            ImGui::Indent(20);
+            ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), "ID: %d | Gen: %d", c->getID(), c->getGeneration());
+            float energyRatio = c->getEnergy() / c->getMaxEnergy();
+            ImVec4 energyColor = energyRatio > 0.6f ? ImVec4(0.3f, 0.8f, 0.3f, 1.0f) :
+                                energyRatio > 0.3f ? ImVec4(0.8f, 0.8f, 0.3f, 1.0f) :
+                                                     ImVec4(0.8f, 0.3f, 0.3f, 1.0f);
+            ImGui::TextColored(energyColor, "Energy: %.0f", c->getEnergy());
+            ImGui::SameLine();
+            ImGui::Text("| Fit: %.1f", c->getFitness());
+
+            // Action buttons for selected creature
+            if (ImGui::Button("Focus Camera", ImVec2(-1, 0))) {
+                if (m_cameraController) {
+                    m_cameraController->startInspect(c);
+                }
+            }
+
+            ImGui::Unindent(20);
+            ImGui::Separator();
+        }
+
+        ImGui::PopID();
     }
 
     ImGui::EndChild();

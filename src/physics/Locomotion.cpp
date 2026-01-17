@@ -425,7 +425,11 @@ void LocomotionController::calculateTorques(float deltaTime) {
         // Integrate angular velocity
         float angularAccel = torque / seg.mass; // Simplified
         js.angularVelocity += angularAccel * deltaTime;
-        js.angularVelocity *= 0.98f; // Damping
+
+        // PHASE 11 - Agent 9: Increased angular damping (prevents spinning)
+        // Old: 0.98f (2% damping) - too weak, allowed spinning to persist
+        // New: 0.85f (15% damping) - strong enough to stop oscillations
+        js.angularVelocity *= 0.85f;
 
         // Integrate angle
         js.currentAngle += js.angularVelocity * deltaTime;

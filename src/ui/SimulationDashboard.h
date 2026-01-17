@@ -184,6 +184,14 @@ private:
     bool m_showGraphs = true;
     bool m_showStatusBar = true;
 
+    // Phase 11: Creature list filtering and search
+    char m_creatureSearchBuffer[64] = "";
+    bool m_filterByHerbivore = true;
+    bool m_filterByCarnivore = true;
+    bool m_filterByAquatic = true;
+    bool m_filterByFlying = true;
+    int m_sortMode = 0; // 0=fitness, 1=name, 2=distance, 3=energy, 4=age
+
     // Callbacks
     SpawnCallback m_spawnCreatureCallback;
     SpawnFoodCallback m_spawnFoodCallback;

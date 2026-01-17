@@ -111,6 +111,16 @@ void IslandComparisonUI::renderOverview(const MultiIslandManager& islands) {
     ImGui::NextColumn();
 
     ImGui::Columns(1);
+
+    // Migration summary (if any migrations occurred)
+    if (globalStats.immigrations > 0 || globalStats.emigrations > 0) {
+        ImGui::Spacing();
+        ImGui::Text("Total Migrations:");
+        ImGui::SameLine();
+        ImGui::TextColored(ImVec4(0.3f, 0.9f, 0.9f, 1.0f), "%d arrivals, %d departures",
+                          globalStats.immigrations, globalStats.emigrations);
+    }
+
     ImGui::Separator();
 
     // Island cards
@@ -580,17 +590,78 @@ void IslandComparisonUI::renderMigrationMap(const MultiIslandManager& islands,
                 ImGui::SameLine();
                 ImGui::TextColored(stateColor, "[%s]", stateStr);
 
+                // Migration type
+                const char* typeStr = "";
+                switch (event.type) {
+                    case MigrationType::COASTAL_DRIFT: typeStr = "Coastal Drift"; break;
+                    case MigrationType::FLYING: typeStr = "Flying"; break;
+                    case MigrationType::FLOATING_DEBRIS: typeStr = "Rafting"; break;
+                    case MigrationType::SEASONAL: typeStr = "Seasonal"; break;
+                    case MigrationType::POPULATION_PRESSURE: typeStr = "Overcrowding"; break;
+                    case MigrationType::FOOD_SCARCITY: typeStr = "Food Scarcity"; break;
+                    case MigrationType::MATE_SEEKING: typeStr = "Mate Seeking"; break;
+                    default: typeStr = "Random"; break;
+                }
+                ImGui::Text("Type: %s", typeStr);
+
                 // Progress
                 char progressBuf[32];
-                snprintf(progressBuf, sizeof(progressBuf), "%.0f%%", event.progress * 100.0f);
+                snprintf(progressBuf, sizeof(progressBuf), "%.0f%% (%.1fs)",
+                        event.progress * 100.0f, event.timeElapsed);
                 ImGui::ProgressBar(event.progress, ImVec2(-1, 0), progressBuf);
 
                 // Survival chance and energy
-                ImGui::Text("Survival: %.0f%%  Energy: %.0f",
-                            event.survivalChance * 100.0f, event.currentEnergy);
+                ImGui::Text("Survival: %.0f%%  Energy: %.0f / %.0f",
+                            event.survivalChance * 100.0f, event.currentEnergy, event.startEnergy);
+
+                // Energy bar
+                float energyRatio = event.currentEnergy / std::max(1.0f, event.startEnergy);
+                ImVec4 energyColor = energyRatio > 0.5f ? ImVec4(0.3f, 0.9f, 0.3f, 1.0f) :
+                                    energyRatio > 0.25f ? ImVec4(0.9f, 0.7f, 0.3f, 1.0f) :
+                                    ImVec4(0.9f, 0.3f, 0.3f, 1.0f);
+                ImGui::PushStyleColor(ImGuiCol_PlotHistogram, energyColor);
+                ImGui::ProgressBar(energyRatio, ImVec2(-1, 0), "");
+                ImGui::PopStyleColor();
 
                 ImGui::Separator();
             }
+        }
+
+        ImGui::EndChild();
+    }
+
+    ImGui::Separator();
+
+    // Recent events from MultiIslandManager
+    const auto& islandEvents = islands.getRecentEvents();
+    if (!islandEvents.empty()) {
+        ImGui::TextColored(ImVec4(0.7f, 0.9f, 1.0f, 1.0f), "Recent Events");
+        ImGui::BeginChild("RecentEvents", ImVec2(0, 150), true);
+
+        // Show last 10 events
+        size_t startIdx = islandEvents.size() > 10 ? islandEvents.size() - 10 : 0;
+        for (size_t i = startIdx; i < islandEvents.size(); ++i) {
+            const auto& evt = islandEvents[i];
+            ImVec4 eventColor = ImVec4(0.9f, 0.9f, 0.9f, 1.0f);
+
+            switch (evt.type) {
+                case IslandEvent::Type::CREATURE_MIGRATED_IN:
+                    eventColor = ImVec4(0.3f, 0.9f, 0.3f, 1.0f);
+                    break;
+                case IslandEvent::Type::CREATURE_MIGRATED_OUT:
+                    eventColor = ImVec4(0.9f, 0.7f, 0.3f, 1.0f);
+                    break;
+                case IslandEvent::Type::POPULATION_BOOM:
+                    eventColor = ImVec4(0.3f, 0.9f, 0.9f, 1.0f);
+                    break;
+                case IslandEvent::Type::POPULATION_CRASH:
+                    eventColor = ImVec4(0.9f, 0.3f, 0.3f, 1.0f);
+                    break;
+                default:
+                    break;
+            }
+
+            ImGui::TextColored(eventColor, "[%.1fs] %s", evt.timestamp, evt.description.c_str());
         }
 
         ImGui::EndChild();

@@ -7,6 +7,10 @@
 #include "SaveManager.h"
 #include "ReplaySystem.h"
 #include <chrono>
+#include <cmath>
+
+// Forward declaration for template specialization
+struct SimCreature;
 
 namespace Forge {
 
@@ -108,6 +112,7 @@ void restoreCreatureFromSaveData(CreatureType& creature, NeuralNetType& brain,
 }
 
 // Helper to build CreatureSnapshot for replay
+// Template version for full Creature class
 template<typename CreatureType>
 CreatureSnapshot buildCreatureSnapshot(const CreatureType& creature) {
     CreatureSnapshot snap;
@@ -126,8 +131,20 @@ CreatureSnapshot buildCreatureSnapshot(const CreatureType& creature) {
     snap.colorB = creature.genome.color.z;
     snap.size = creature.genome.size;
 
+    // Genome data for replay
+    snap.genomeSpeed = creature.genome.speed;
+    snap.genomeSize = creature.genome.size;
+    snap.genomeVision = creature.genome.visionRange;
+
+    // Phase 10 Agent 7: Add age and generation for replay visualization
+    snap.age = creature.age;
+    snap.generation = creature.generation;
+
+    // Neural weights would be populated separately if needed for detailed replay
+
     return snap;
 }
+
 
 // Helper to build FoodSaveData
 template<typename FoodType>
@@ -289,5 +306,48 @@ ReplayFrame buildCurrentFrame() {
     return frame;
 }
 */
+
+} // namespace Forge
+
+// ============================================================================
+// Template Specialization for SimCreature (outside namespace)
+// ============================================================================
+
+// Specialized version for SimCreature (handles differences in field names)
+// This overload will be used for main.cpp's SimCreature struct
+namespace Forge {
+
+// Overload for SimCreature that adapts to its specific field layout
+inline CreatureSnapshot buildCreatureSnapshotFromSim(const SimCreature& creature) {
+    CreatureSnapshot snap;
+
+    snap.id = creature.id;
+    snap.type = static_cast<uint8_t>(creature.type);
+    snap.posX = creature.position.x;
+    snap.posY = creature.position.y;
+    snap.posZ = creature.position.z;
+    // SimCreature uses 'facing' vector instead of rotation angle
+    snap.rotation = std::atan2(creature.facing.x, creature.facing.z);
+    snap.health = creature.energy;  // SimCreature doesn't have separate health
+    snap.energy = creature.energy;
+    snap.animPhase = 0.0f;  // SimCreature doesn't track animPhase (will be added by Agent 1)
+    snap.colorR = creature.genome.color.x;
+    snap.colorG = creature.genome.color.y;
+    snap.colorB = creature.genome.color.z;
+    snap.size = creature.genome.size;
+
+    // Genome data for replay
+    snap.genomeSpeed = creature.genome.speed;
+    snap.genomeSize = creature.genome.size;
+    snap.genomeVision = creature.genome.visionRange;
+
+    // Phase 10 Agent 7: Add age and generation for replay visualization
+    // NOTE: These fields will be added to SimCreature by Agent 1
+    // For now, use placeholders - Agent 1 will update to use real fields
+    snap.age = 0.0f;        // TODO Agent 1: Update to creature.age
+    snap.generation = 1;    // TODO Agent 1: Update to creature.generation
+
+    return snap;
+}
 
 } // namespace Forge

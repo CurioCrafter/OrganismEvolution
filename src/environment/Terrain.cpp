@@ -5,6 +5,7 @@
 #include "../graphics/DX12Device.h"
 #endif
 #include <glm/gtc/matrix_transform.hpp>
+#include "TerrainSampler.h"
 #include <cmath>
 #include <algorithm>
 #include <iostream>
@@ -149,13 +150,14 @@ void Terrain::initializeDX12(DX12Device* device, ID3D12PipelineState* pso, ID3D1
 
 void Terrain::generate(unsigned int seed) {
     heightMap.resize(width * depth);
+    waterLevel = TerrainSampler::WATER_LEVEL;
 
     // Generate height map using the shared terrain noise profile
     for (int z = 0; z < depth; z++) {
         for (int x = 0; x < width; x++) {
             float worldX = (x - width / 2.0f) * scale;
             float worldZ = (z - depth / 2.0f) * scale;
-            float height = TerrainNoise::sampleHeightNormalized(worldX, worldZ);
+            float height = TerrainSampler::SampleHeightNormalized(worldX, worldZ);
 
             heightMap[z * width + x] = height;
         }
@@ -176,7 +178,7 @@ void Terrain::setupMesh() {
             TerrainVertex vertex;
             vertex.position = glm::vec3(
                 (x - width / 2.0f) * scale,
-                height * 30.0f, // Height scale
+                height * TerrainSampler::HEIGHT_SCALE,
                 (z - depth / 2.0f) * scale
             );
 
@@ -509,7 +511,7 @@ float Terrain::getHeight(float x, float z) const {
     float h1 = h01 + (h11 - h01) * tx;
     float h = h0 + (h1 - h0) * tz;
 
-    return h * 30.0f;
+    return h * TerrainSampler::HEIGHT_SCALE;
 }
 
 bool Terrain::getHeightSafe(float x, float z, float& outHeight) const {
@@ -550,7 +552,7 @@ bool Terrain::getHeightSafe(float x, float z, float& outHeight) const {
     float h1 = h01 + (h11 - h01) * tx;
     float h = h0 + (h1 - h0) * tz;
 
-    outHeight = h * 30.0f;
+    outHeight = h * TerrainSampler::HEIGHT_SCALE;
     return true;
 }
 
@@ -580,7 +582,7 @@ bool Terrain::isWater(float x, float z) const {
         return true;
     }
 
-    return height < waterLevel * 30.0f;
+    return height < TerrainSampler::GetWaterHeight();
 }
 
 glm::vec3 Terrain::getNormal(float x, float z) const {
@@ -602,11 +604,11 @@ glm::vec3 Terrain::getNormal(float x, float z) const {
 
 glm::vec3 Terrain::getTerrainColor(float height) {
     // Water
-    if (height < waterLevel) {
+    if (height < TerrainSampler::WATER_LEVEL) {
         return glm::vec3(0.2f, 0.4f, 0.8f);
     }
     // Beach/Sand
-    else if (height < 0.42f) {
+    else if (height < TerrainSampler::BEACH_LEVEL) {
         return glm::vec3(0.9f, 0.85f, 0.6f);
     }
     // Grass

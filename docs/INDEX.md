@@ -20,7 +20,8 @@ This directory contains all project documentation, organized into logical catego
 | [Platform Specific](platform_specific/) | 5 | Platform docs | Win32 input system |
 | [Phase Status](phase_status/) | 9 | Project phases | Phase completion reports |
 | [Reference](reference/) | 5 | Planning & roadmap | Roadmap, comprehensive plans |
-| [Agent Prompts](agent_prompts/) | 6 | AI agent prompts | Phase-specific agent instructions |
+| [Agent Prompts](agent_prompts/) | 13 | AI agent prompts | Phase-specific agent instructions |
+| **Phase 10 Docs** | 8 | Integration docs | Save/Replay, Multi-Island, Biochemistry, Observer UI |
 | [Archive](archive/) | 30 | Legacy/historical/aspirational | Deprecated, unimplemented, historical |
 
 ---
@@ -33,7 +34,8 @@ This directory contains all project documentation, organized into logical catego
 | **Procedural Terrain** | Complete | Integrated | YES |
 | **Grass/Tree Rendering** | Complete | Integrated | YES |
 | **Water Rendering** | Complete | Integrated | YES |
-| **Creature Simulation** | Complete | Integrated | YES (basic) |
+| **Creature Simulation** | Complete | Integrated | YES (basic - SimCreature) |
+| **CreatureManager (Phase 10)** | Complete | **PARTIAL** | Being integrated |
 | **ImGui Debug Panel** | Complete | Integrated | YES |
 | **Day/Night Cycle** | Complete | Integrated | YES (visual only) |
 | **Camera System** | Complete | Integrated | YES |
@@ -123,8 +125,10 @@ docs/
 │   ├── IMPROVEMENTS_SUMMARY.md
 │   └── COMPREHENSIVE_TODO_DOCUMENTATION.md
 │
-├── agent_prompts/        # AI agent instructions (6 files)
-│   └── AGENT_PROMPTS_PHASE*.md
+├── agent_prompts/        # AI agent instructions (11 files)
+│   ├── AGENT_PROMPTS_PHASE*.md
+│   ├── PHASE10_AGENT1_*.md    # Phase 10: SimStack unification
+│   └── PHASE10_AGENT2_WORLDGEN_WIRING.md  # MainMenu → ProceduralWorld wiring
 │
 └── archive/              # Legacy & historical (30 files)
     ├── BUILD_INSTRUCTIONS.md      # Legacy MSYS2 build
@@ -196,6 +200,119 @@ The `archive/` folder contains 30 documents that are:
 - **Completed**: Migration guides for finished transitions
 
 **WARNING**: Do not use archive documents as feature references - they describe aspirational features, not reality.
+
+---
+
+## Recent Updates (Phase 10 - January 16, 2026)
+
+### Agent 7: Save/Load and Replay Integrity
+
+**Completed:** Infrastructure updates for comprehensive creature data persistence
+
+**Files Modified:**
+- [src/core/ReplaySystem.h](../src/core/ReplaySystem.h) - Added age/generation to CreatureSnapshot
+- [src/core/SaveSystemIntegration.h](../src/core/SaveSystemIntegration.h) - Enhanced snapshot builders
+- **[docs/PHASE10_AGENT7_SAVE_REPLAY.md](PHASE10_AGENT7_SAVE_REPLAY.md)** - Complete implementation guide
+
+**Changes:**
+1. ✅ Enhanced `CreatureSnapshot` with age and generation fields for replay visualization
+2. ✅ Updated replay serialization to include behavior tracking data
+3. ✅ Created `buildCreatureSnapshotFromSim()` helper for SimCreature compatibility
+4. ✅ Maintained backward compatibility (no version bump required)
+5. ✅ Documented data model alignment strategy
+
+**Status:** Infrastructure ready for Agent 1 runtime integration
+
+**Handoff to Agent 1:**
+- Add age, generation, tracking fields to `SimCreature` struct in main.cpp
+- Wire up tracking code in creature update loops (age increment, foodEaten, etc.)
+- Update snapshot builders to use real data instead of placeholders
+- See [PHASE10_AGENT7_SAVE_REPLAY.md](PHASE10_AGENT7_SAVE_REPLAY.md) for complete implementation plan
+
+**Impact:**
+- Save files will capture full creature lifecycle data
+- Replays will display accurate age and generation stats
+- No breaking changes to existing save format
+
+---
+
+### Agent 6: Biochemistry and Evolution Preset Integration
+
+**Completed:** Planet chemistry affects survival; evolution presets control starting complexity
+
+**Files Modified:**
+- [src/environment/ProceduralWorld.h](../src/environment/ProceduralWorld.h) - Added `PlanetChemistry planetChemistry` to `GeneratedWorld`
+- [src/environment/ProceduralWorld.cpp](../src/environment/ProceduralWorld.cpp) - Chemistry generation and logging
+- [src/entities/Genome.cpp](../src/entities/Genome.cpp) - Preset initialization and chemistry adaptation (already implemented)
+- **[docs/PHASE10_AGENT6_BIOCHEM_INTEGRATION.md](PHASE10_AGENT6_BIOCHEM_INTEGRATION.md)** - Complete system documentation
+- **[docs/AGENT1_BIOCHEMISTRY_HANDOFF.md](AGENT1_BIOCHEMISTRY_HANDOFF.md)** - Runtime integration guide for Agent 1
+
+**Changes:**
+1. ✅ `PlanetChemistry` now generated per world from seed
+2. ✅ Stored in `GeneratedWorld` for runtime access
+3. ✅ World generation logs show chemistry profile (solvent, atmosphere, pH, temperature, etc.)
+4. ✅ `EvolutionStartPreset` ranges implemented (PROTO, EARLY_LIMB, COMPLEX, ADVANCED)
+5. ✅ `EvolutionGuidanceBias` soft multipliers implemented (LAND, AQUATIC, FLIGHT, UNDERGROUND)
+6. ✅ `Genome::initializeForPreset()` applies preset ranges and bias at spawn time
+7. ✅ `Genome::adaptToChemistry()` aligns biochemistry traits to planet
+8. ✅ `Genome::mutateWithChemistry()` biases evolution toward compatibility
+9. ✅ `BiochemistrySystem` computes compatibility scores
+10. ✅ Species-level caching system for performance
+
+**Status:** System complete, ready for Agent 1 runtime penalty application
+
+**Handoff to Agent 1:**
+- Pass `world.planetChemistry` to creature updates
+- Apply energy penalty: `BIOCHEM_ENERGY_PENALTY(genome, chemistry)` (multiplier 1.0-2.0+)
+- Apply health penalty: `BIOCHEM_HEALTH_PENALTY(genome, chemistry)` (damage/sec 0-2.0+)
+- Apply reproduction penalty: `BIOCHEM_REPRO_PENALTY(genome, chemistry)` (multiplier 0-1.0)
+- See [AGENT1_BIOCHEMISTRY_HANDOFF.md](AGENT1_BIOCHEMISTRY_HANDOFF.md) for step-by-step integration
+
+**Impact:**
+- Planet chemistry now affects creature survival
+- Evolution presets enable varied starting complexity
+- Chemistry-aware mutations drive adaptation over generations
+- Creates ecological pressure for biochemical evolution
+
+---
+
+### Agent 8: Observer UI, Selection, and Inspection (Creature Focus)
+
+**Completed:** Reliable click-to-inspect functionality and observer UI with live creature data display
+
+**Files Modified:**
+- [src/main.cpp](../src/main.cpp) - SelectionSystem and CreatureInspectionPanel integration
+- [src/ui/CreatureInspectionPanel.cpp](../src/ui/CreatureInspectionPanel.cpp) - Enhanced status display with color-coded badges
+- **[docs/PHASE10_AGENT8_OBSERVER_UI.md](PHASE10_AGENT8_OBSERVER_UI.md)** - Complete implementation and usage guide
+
+**Changes:**
+1. ✅ Added `SelectionSystem` to main UI loop with raycasting from screen to world coordinates
+2. ✅ Added `CreatureInspectionPanel` with live data updates
+3. ✅ Wired selection callback: SelectionSystem → CreatureInspectionPanel
+4. ✅ Synchronized Camera object with orbit camera for selection raycasting
+5. ✅ Implemented color-coded activity badges (Fleeing, Migrating, Running, Resting, Wandering)
+6. ✅ Implemented color-coded behavior badges (FLEEING, Seeking Food, Seeking Mate, Migrating, Exploring)
+7. ✅ Render selection indicators (circles, brackets) for selected creatures
+8. ✅ Render screen indicators for inspection modes (VIEWING, FOCUSED, TRACKING)
+9. ✅ Camera focus controls (Focus, Track, Release) using CameraController inspect mode
+
+**Status:** Fully integrated and functional
+
+**Features:**
+- **Click-to-Select**: Ray casting for precise creature selection
+- **Box Selection**: Drag to select multiple creatures
+- **Live Inspection Panel**: Real-time creature data with expandable sections
+- **Camera Modes**: VIEWING (panel only), FOCUSED (camera at creature), TRACKING (camera follows)
+- **Visual Indicators**: Color-coded selection circles and tracking brackets
+- **Activity Display**: Real-time activity state with color badges
+- **Behavior Display**: Real-time behavior state with color badges
+
+**Impact:**
+- Users can now click on any creature to inspect its live data
+- Clear visual feedback with color-coded status badges
+- Smooth camera integration for creature observation
+- Supports land, aquatic, and flying creatures
+- Graceful handling of creature despawn
 
 ---
 

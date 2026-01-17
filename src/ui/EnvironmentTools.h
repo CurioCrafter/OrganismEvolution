@@ -427,7 +427,7 @@ inline void EnvironmentTools::renderWeatherControls() {
         ImGui::Text("Current Weather: %s", getWeatherName(state.type));
         ImGui::Text("Cloud Cover: %.0f%%", state.cloudCoverage * 100.0f);
         ImGui::Text("Precipitation: %.2f", state.precipitationIntensity);
-        ImGui::Text("Wind: %.1f", state.windSpeed);
+        ImGui::Text("Wind: %.1f", state.windStrength);
 
         ImGui::Separator();
     }

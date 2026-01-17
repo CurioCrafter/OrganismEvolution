@@ -258,17 +258,28 @@ void InterIslandMigration::completeMigration(MigrationEvent& event, MultiIslandM
             // Energy was already reduced during transit - creature arrives with remaining energy
         }
 
-        // Update statistics
+        // Update island statistics for migration tracking
+        auto* srcIsland = islands.getIsland(event.sourceIsland);
+        if (srcIsland) {
+            srcIsland->stats.emigrations++;
+        }
+        dstIsland->stats.immigrations++;
+
+        // Update migration statistics
         m_stats.successfulMigrations++;
         m_stats.successesByType[static_cast<int>(event.type)]++;
 
         auto key = std::make_pair(event.sourceIsland, event.targetIsland);
         m_stats.migrationsBetweenIslands[key]++;
 
-        // Update average survival rate
+        // Update average survival rate and travel time
         float totalSuccess = static_cast<float>(m_stats.successfulMigrations);
         float totalAttempts = static_cast<float>(m_stats.totalAttempts);
         m_stats.avgSurvivalRate = totalSuccess / std::max(1.0f, totalAttempts);
+
+        // Update average travel time (weighted average)
+        float weight = 1.0f / std::max(1.0f, totalSuccess);
+        m_stats.avgTravelTime = m_stats.avgTravelTime * (1.0f - weight) + event.timeElapsed * weight;
     } else {
         failMigration(event, islands);
     }
@@ -412,7 +423,7 @@ float InterIslandMigration::calculateTravelTime(uint32_t sourceIsland, uint32_t 
     return distance / std::max(0.1f, speed);
 }
 
-MigrationType InterIslandMigration::getBestMigrationType(const Creature* creature) const {
+MigrationType InterIslandMigration::getBestMigrationType(const Creature* creature) {
     if (!creature) return MigrationType::RANDOM_DISPERSAL;
 
     CreatureType type = creature->getType();

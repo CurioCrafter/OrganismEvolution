@@ -4,7 +4,9 @@
 #include "BiomeSystem.h"
 #include "PlanetTheme.h"
 #include "PlanetSeed.h"
+#include "PlanetChemistry.h"
 #include <memory>
+#include <functional>
 #include <random>
 
 // Forward declarations
@@ -180,6 +182,17 @@ struct VegetationDensityConfig {
     static VegetationDensityConfig overgrown();
 };
 
+// Biome weight overrides from UI
+struct BiomeWeights {
+    float forestWeight = 1.0f;
+    float grasslandWeight = 1.0f;
+    float desertWeight = 1.0f;
+    float tundraWeight = 1.0f;
+    float wetlandWeight = 1.0f;
+    float mountainWeight = 1.0f;
+    float volcanicWeight = 1.0f;
+};
+
 // World generation configuration
 struct WorldGenConfig {
     // Island settings
@@ -189,6 +202,10 @@ struct WorldGenConfig {
     bool generateRivers = true;
     bool generateLakes = true;
     bool generateCaves = true;
+
+    // World scale (from MainMenu)
+    float terrainScale = 2000.0f;       // Physical world size in units (4x larger default)
+    float oceanCoverage = 0.3f;         // Water coverage (0-1)
 
     // Planet theme
     PlanetPreset themePreset = PlanetPreset::EARTH_LIKE;
@@ -201,9 +218,18 @@ struct WorldGenConfig {
 
     // Multi-region configuration (for archipelago worlds)
     MultiRegionConfig multiRegion;
+    int desiredRegionCount = 1;         // Number of separate landmasses (MainMenu input)
 
     // Vegetation density preset
     VegetationDensityConfig vegetationConfig;
+
+    // Biome weight overrides (from MainMenu sliders)
+    BiomeWeights biomeWeights;
+
+    // Climate overrides (from MainMenu)
+    float temperatureBias = 0.5f;       // Global temperature (0=cold, 1=hot)
+    float moistureBias = 0.5f;          // Global moisture (0=dry, 1=wet)
+    float seasonIntensity = 0.5f;       // Season variation (0=none, 1=extreme)
 
     // Terrain erosion control
     int erosionPasses = 3;              // 0-10, hydraulic erosion iterations
@@ -249,6 +275,9 @@ struct GeneratedWorld {
     // Vegetation configuration used
     VegetationDensityConfig vegetationConfig;
 
+    // Planet chemistry profile (affects creature survival and evolution)
+    PlanetChemistry planetChemistry;
+
     // Theme profile used (if weighted selection)
     std::string themeName;
     ThemeRarity themeRarity = ThemeRarity::COMMON;
@@ -289,20 +318,23 @@ public:
     ProceduralWorld();
     ~ProceduralWorld();
 
+    using ProgressCallback = std::function<void(float, const char*)>;
+    void setProgressCallback(ProgressCallback cb) { m_progressCallback = std::move(cb); }
+
     // Generate a complete world
-    GeneratedWorld generate(const WorldGenConfig& config);
+    const GeneratedWorld& generate(const WorldGenConfig& config);
 
     // Generate with just a seed (uses random settings)
-    GeneratedWorld generateRandom(uint32_t seed = 0);
+    const GeneratedWorld& generateRandom(uint32_t seed = 0);
 
     // Generate with a specific preset
-    GeneratedWorld generatePreset(IslandShape shape, PlanetPreset theme, uint32_t seed = 0);
+    const GeneratedWorld& generatePreset(IslandShape shape, PlanetPreset theme, uint32_t seed = 0);
 
     // Quick generation methods
-    GeneratedWorld generateEarthLikeIsland(uint32_t seed = 0);
-    GeneratedWorld generateAlienWorld(uint32_t seed = 0);
-    GeneratedWorld generateArchipelago(uint32_t seed = 0);
-    GeneratedWorld generateVolcanicIsland(uint32_t seed = 0);
+    const GeneratedWorld& generateEarthLikeIsland(uint32_t seed = 0);
+    const GeneratedWorld& generateAlienWorld(uint32_t seed = 0);
+    const GeneratedWorld& generateArchipelago(uint32_t seed = 0);
+    const GeneratedWorld& generateVolcanicIsland(uint32_t seed = 0);
 
     // Get the raw heightmap for terrain rendering
     const std::vector<float>& getHeightmap() const;
@@ -321,7 +353,7 @@ public:
     GeneratedWorld* getMutableCurrentWorld() { return m_currentWorld.get(); }
 
     // Regenerate with same config but new seed
-    GeneratedWorld regenerate();
+    const GeneratedWorld& regenerate();
 
     // Accessors
     const IslandGenerator& getIslandGenerator() const { return m_islandGenerator; }
@@ -330,6 +362,26 @@ public:
 
     // Get planet seed fingerprint for display
     std::string getSeedFingerprint() const;
+
+    // ===== World Output Getters (for UI and runtime) =====
+    uint32_t getUsedSeed() const { return m_lastSeed; }
+    std::string getThemeName() const;
+    float getGenerationTimeMs() const;
+    float getTerrainScale() const;
+    float getWaterLevel() const;
+
+    // Biome distribution percentages
+    struct BiomeDistribution {
+        float desertPercentage = 0.0f;
+        float forestPercentage = 0.0f;
+        float grasslandPercentage = 0.0f;
+        float tundraPercentage = 0.0f;
+        float wetlandPercentage = 0.0f;
+        float mountainPercentage = 0.0f;
+        float volcanicPercentage = 0.0f;
+        float oceanPercentage = 0.0f;
+    };
+    BiomeDistribution getBiomeDistribution() const;
 
     // ===== Session Seed Override System =====
     // Returns the session seed (time-based if no explicit seed was provided)
@@ -402,6 +454,7 @@ public:
     void logWorldGeneration(const GeneratedWorld& world) const;
 
 private:
+    void reportProgress(float progress, const char* stage) const;
     // Apply seed-driven variation to theme
     void applyThemeVariation(PlanetTheme& theme, const PlanetSeed& seed, const ThemeProfile& profile);
 
@@ -410,6 +463,9 @@ private:
 
     // Apply climate variation from seed
     void applyClimateVariation(BiomeSystem& biomeSystem, const PlanetSeed& seed);
+
+    // Apply biome weight overrides from UI
+    void applyBiomeWeights(BiomeSystem& biomeSystem, const BiomeWeights& weights);
 
     // Cache palette variation for shader integration
     void cachePaletteVariation(const PlanetSeed& seed);
@@ -448,6 +504,7 @@ private:
 
     std::random_device m_rd;
     std::mt19937 m_rng;
+    ProgressCallback m_progressCallback;
 };
 
 // Integration helpers

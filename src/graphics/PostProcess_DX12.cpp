@@ -1,10 +1,17 @@
 #include "PostProcess_DX12.h"
+#include "../environment/PlanetTheme.h"
 #include <iostream>
 #include <random>
 #include <cmath>
 
 using namespace DirectX;
 using Microsoft::WRL::ComPtr;
+
+namespace {
+DirectX::XMFLOAT3 ToXMFLOAT3(const glm::vec3& v) {
+    return DirectX::XMFLOAT3(v.x, v.y, v.z);
+}
+}  // namespace
 
 // ============================================================================
 // Constructor / Destructor
@@ -940,38 +947,168 @@ bool PostProcessManagerDX12::compileShader(const std::wstring& path, const std::
 
 bool PostProcessManagerDX12::createComputePSOs()
 {
-    // Note: For full implementation, these would compile the HLSL shaders
-    // For now, we'll leave them as placeholders since the project uses DXC
-    // and a different shader compilation path
+    // Real implementation: Compile compute shaders using DXC
+    // This creates PSOs for SSAO, Bloom, SSR, Volumetrics, and Underwater effects
 
-    std::cout << "[PostProcess] Compute PSO creation deferred to shader manager" << std::endl;
+    std::cout << "[PostProcess] Creating compute PSOs with DXC..." << std::endl;
 
-    // The PSOs will be null, which is handled gracefully in render passes
-    // A complete implementation would:
-    // 1. Compile SSAO.hlsl with entry point "CSMain" -> m_ssaoPSO
-    // 2. Compile SSAO.hlsl with entry point "CSBlur" -> m_ssaoBlurPSO
-    // 3. Compile Bloom.hlsl with entry point "CSExtract" -> m_bloomExtractPSO
-    // 4. Compile Bloom.hlsl with entry point "CSDownsample" -> m_bloomBlurPSO
-    // 5. Compile SSR.hlsl with entry point "CSMain" -> m_ssrPSO
-    // 6. Compile VolumetricFog.hlsl with entry point "CSMain" -> m_volumetricPSO
+    // Create compute PSO descriptor template
+    D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc = {};
+    psoDesc.pRootSignature = m_computeRootSignature.Get();
+    psoDesc.Flags = D3D12_PIPELINE_STATE_FLAG_NONE;
 
-    return true;  // Return true to allow pipeline to continue
+    // SSAO PSO
+    {
+        ComPtr<ID3DBlob> shader;
+        if (compileShader(L"Runtime/Shaders/SSAO.hlsl", "CSMain", L"cs_6_0", &shader)) {
+            psoDesc.CS = { shader->GetBufferPointer(), shader->GetBufferSize() };
+            HRESULT hr = m_device->CreateComputePipelineState(&psoDesc, IID_PPV_ARGS(&m_ssaoPSO));
+            if (SUCCEEDED(hr)) {
+                std::cout << "[PostProcess] SSAO PSO created" << std::endl;
+            }
+        }
+    }
+
+    // SSAO Blur PSO
+    {
+        ComPtr<ID3DBlob> shader;
+        if (compileShader(L"Runtime/Shaders/SSAO.hlsl", "CSBlur", L"cs_6_0", &shader)) {
+            psoDesc.CS = { shader->GetBufferPointer(), shader->GetBufferSize() };
+            HRESULT hr = m_device->CreateComputePipelineState(&psoDesc, IID_PPV_ARGS(&m_ssaoBlurPSO));
+            if (SUCCEEDED(hr)) {
+                std::cout << "[PostProcess] SSAO Blur PSO created" << std::endl;
+            }
+        }
+    }
+
+    // Bloom Extract PSO
+    {
+        ComPtr<ID3DBlob> shader;
+        if (compileShader(L"Runtime/Shaders/Bloom.hlsl", "CSExtract", L"cs_6_0", &shader)) {
+            psoDesc.CS = { shader->GetBufferPointer(), shader->GetBufferSize() };
+            HRESULT hr = m_device->CreateComputePipelineState(&psoDesc, IID_PPV_ARGS(&m_bloomExtractPSO));
+            if (SUCCEEDED(hr)) {
+                std::cout << "[PostProcess] Bloom Extract PSO created" << std::endl;
+            }
+        }
+    }
+
+    // Bloom Blur/Downsample PSO
+    {
+        ComPtr<ID3DBlob> shader;
+        if (compileShader(L"Runtime/Shaders/Bloom.hlsl", "CSDownsample", L"cs_6_0", &shader)) {
+            psoDesc.CS = { shader->GetBufferPointer(), shader->GetBufferSize() };
+            HRESULT hr = m_device->CreateComputePipelineState(&psoDesc, IID_PPV_ARGS(&m_bloomBlurPSO));
+            if (SUCCEEDED(hr)) {
+                std::cout << "[PostProcess] Bloom Blur PSO created" << std::endl;
+            }
+        }
+    }
+
+    // SSR PSO
+    {
+        ComPtr<ID3DBlob> shader;
+        if (compileShader(L"Runtime/Shaders/SSR.hlsl", "CSMain", L"cs_6_0", &shader)) {
+            psoDesc.CS = { shader->GetBufferPointer(), shader->GetBufferSize() };
+            HRESULT hr = m_device->CreateComputePipelineState(&psoDesc, IID_PPV_ARGS(&m_ssrPSO));
+            if (SUCCEEDED(hr)) {
+                std::cout << "[PostProcess] SSR PSO created" << std::endl;
+            }
+        }
+    }
+
+    // Volumetric Fog PSO
+    {
+        ComPtr<ID3DBlob> shader;
+        if (compileShader(L"Runtime/Shaders/VolumetricFog.hlsl", "CSMain", L"cs_6_0", &shader)) {
+            psoDesc.CS = { shader->GetBufferPointer(), shader->GetBufferSize() };
+            HRESULT hr = m_device->CreateComputePipelineState(&psoDesc, IID_PPV_ARGS(&m_volumetricPSO));
+            if (SUCCEEDED(hr)) {
+                std::cout << "[PostProcess] Volumetric PSO created" << std::endl;
+            }
+        }
+    }
+
+    // Underwater PSO
+    {
+        ComPtr<ID3DBlob> shader;
+        if (compileShader(L"Runtime/Shaders/Underwater.hlsl", "CSMain", L"cs_6_0", &shader)) {
+            psoDesc.CS = { shader->GetBufferPointer(), shader->GetBufferSize() };
+            HRESULT hr = m_device->CreateComputePipelineState(&psoDesc, IID_PPV_ARGS(&m_underwaterPSO));
+            if (SUCCEEDED(hr)) {
+                std::cout << "[PostProcess] Underwater PSO created" << std::endl;
+            }
+        }
+    }
+
+    std::cout << "[PostProcess] Compute PSO creation completed" << std::endl;
+    return true;  // Return true even if some PSOs fail (graceful degradation)
 }
 
 bool PostProcessManagerDX12::createGraphicsPSOs()
 {
-    // Note: For full implementation, these would compile ToneMapping.hlsl
-    // For now, we'll leave as placeholders
+    // Real implementation: Compile tone mapping shaders
+    std::cout << "[PostProcess] Creating graphics PSOs..." << std::endl;
 
-    std::cout << "[PostProcess] Graphics PSO creation deferred to shader manager" << std::endl;
+    ComPtr<ID3DBlob> vsBlob, psBlob;
 
-    // A complete implementation would:
-    // 1. Compile ToneMapping.hlsl with entry points "VSMain" and "PSMain"
-    // 2. Create graphics PSO with no depth test, blend disabled
-    // 3. Set primitive topology to triangle list
-    // 4. Use R8G8B8A8_UNORM render target format
+    // Compile vertex and pixel shaders for tone mapping
+    if (!compileShader(L"Runtime/Shaders/ToneMapping.hlsl", "VSMain", L"vs_6_0", &vsBlob)) {
+        std::cerr << "[PostProcess] Failed to compile tone mapping vertex shader" << std::endl;
+        return false;
+    }
 
-    return true;  // Return true to allow pipeline to continue
+    if (!compileShader(L"Runtime/Shaders/ToneMapping.hlsl", "PSMain", L"ps_6_0", &psBlob)) {
+        std::cerr << "[PostProcess] Failed to compile tone mapping pixel shader" << std::endl;
+        return false;
+    }
+
+    // Create graphics PSO for tone mapping (fullscreen pass)
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
+    psoDesc.pRootSignature = m_graphicsRootSignature.Get();
+
+    // Vertex shader
+    psoDesc.VS = { vsBlob->GetBufferPointer(), vsBlob->GetBufferSize() };
+
+    // Pixel shader
+    psoDesc.PS = { psBlob->GetBufferPointer(), psBlob->GetBufferSize() };
+
+    // Blend state (no blending needed - replace)
+    psoDesc.BlendState.RenderTarget[0].BlendEnable = FALSE;
+    psoDesc.BlendState.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+
+    // Rasterizer state (no culling for fullscreen triangle)
+    psoDesc.RasterizerState.FillMode = D3D12_FILL_MODE_SOLID;
+    psoDesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
+    psoDesc.RasterizerState.FrontCounterClockwise = FALSE;
+    psoDesc.RasterizerState.DepthClipEnable = TRUE;
+
+    // Depth/stencil state (no depth test for fullscreen)
+    psoDesc.DepthStencilState.DepthEnable = FALSE;
+    psoDesc.DepthStencilState.StencilEnable = FALSE;
+
+    // Input layout (none - fullscreen triangle generated in vertex shader)
+    psoDesc.InputLayout = { nullptr, 0 };
+
+    // Primitive topology
+    psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+
+    // Render target format (LDR output)
+    psoDesc.NumRenderTargets = 1;
+    psoDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+
+    // Sample desc
+    psoDesc.SampleDesc.Count = 1;
+    psoDesc.SampleMask = UINT_MAX;
+
+    HRESULT hr = m_device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&m_toneMappingPSO));
+    if (FAILED(hr)) {
+        std::cerr << "[PostProcess] Failed to create tone mapping PSO" << std::endl;
+        return false;
+    }
+
+    std::cout << "[PostProcess] Tone mapping PSO created" << std::endl;
+    return true;
 }
 
 // ============================================================================
@@ -1546,4 +1683,44 @@ void PostProcessManagerDX12::setColorGradingPreset(float dawn, float noon, float
     } else {
         updateColorGrading(0.0f);   // Midnight
     }
+}
+
+void PostProcessManagerDX12::integrateThemeColors(const class PlanetTheme* theme)
+{
+    if (!theme) return;
+
+    // Get the color grading data from the planet theme
+    const auto& themeGrading = theme->getColorGrading();
+
+    // Apply planet theme's base color grading
+    // This affects shadows, highlights, and overall color balance
+
+    // Update base postprocess parameters to match theme
+    saturation = themeGrading.saturation;
+    contrast = themeGrading.contrast;
+    gamma = themeGrading.gamma;
+
+    // Set color lift and gain from theme
+    colorLift = ToXMFLOAT3(themeGrading.shadowColor);
+    colorGain = ToXMFLOAT3(themeGrading.highlightColor);
+
+    // Update fog colors from theme atmosphere
+    const auto& atmosphere = theme->getCurrentAtmosphere();
+    distanceFogColor = ToXMFLOAT3(atmosphere.fogColor);
+    fogDensity = atmosphere.fogDensity;
+    distanceFogStart = atmosphere.fogStart;
+
+    // Update underwater colors from theme
+    const auto& terrain = theme->getTerrain();
+    underwaterFogColor = ToXMFLOAT3(terrain.deepWaterColor);
+
+    // Apply theme's split-tone colors to time-of-day grading
+    colorGrading.shadowTint = ToXMFLOAT3(themeGrading.splitToneShadows);
+    colorGrading.highlightTint = ToXMFLOAT3(themeGrading.splitToneHighlights);
+
+    // Vignette from theme
+    colorGrading.vignetteIntensity = themeGrading.vignetteIntensity;
+    colorGrading.vignetteRadius = themeGrading.vignetteRadius;
+
+    std::cout << "[PostProcess] Integrated planet theme colors" << std::endl;
 }

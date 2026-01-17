@@ -5,9 +5,22 @@
 #include "IKSolver.h"
 #include <algorithm>
 #include <cmath>
+#include <initializer_list>
 #include <sstream>
 
 namespace animation {
+
+namespace {
+int32_t findBone(const Skeleton& skeleton, std::initializer_list<const char*> names) {
+    for (const char* name : names) {
+        int32_t idx = skeleton.findBoneIndex(name);
+        if (idx >= 0) {
+            return idx;
+        }
+    }
+    return -1;
+}
+}  // namespace
 
 // =============================================================================
 // ACTIVITY STATE MACHINE IMPLEMENTATION
@@ -427,8 +440,96 @@ void ActivityAnimationDriver::applyToPose(
 {
     if (!m_stateMachine || m_activityWeight < 0.01f) return;
 
-    // The body offset/rotation would be blended with locomotion
-    // This is a simplified implementation - full version would modify bones directly
+    // Find important bones for activity animation (try common names across rigs)
+    int32_t spineIndex = findBone(skeleton, {"spine_upper", "spine_middle", "spine_lower", "body_0"});
+    int32_t headIndex = findBone(skeleton, {"head"});
+    int32_t neckIndex = findBone(skeleton, {"neck"});
+    int32_t hipIndex = findBone(skeleton, {"pelvis", "body_0"});
+    int32_t tailBaseIndex = findBone(skeleton, {"tail_1", "tail_base", "tail_2"});
+
+    // Apply body offset and rotation to spine/hip
+    if (spineIndex >= 0) {
+        BoneTransform& spineTrans = pose.getLocalTransform(spineIndex);
+
+        // Blend in body offset
+        spineTrans.translation = spineTrans.translation + m_bodyOffset * m_activityWeight;
+
+        // Blend in body rotation
+        spineTrans.rotation = glm::slerp(spineTrans.rotation,
+                                         spineTrans.rotation * m_bodyRotation,
+                                         m_activityWeight);
+    }
+
+    // Apply head target via IK if available
+    if (m_hasHeadTarget && headIndex >= 0 && ikSystem) {
+        // Set head look target
+        ikSystem->setLookAtTarget(m_headTarget);
+        ikSystem->setLookAtWeight(m_activityWeight);
+    }
+
+    // For sleeping/resting activities, lower entire body
+    ActivityType activity = m_stateMachine->getCurrentActivity();
+    if (activity == ActivityType::SLEEPING && hipIndex >= 0) {
+        BoneTransform& hipTrans = pose.getLocalTransform(hipIndex);
+        float sleepLower = -0.15f * m_bodySize * m_activityWeight;
+        hipTrans.translation.y += sleepLower;
+    }
+
+    // For grooming activities, add specific bone rotations
+    if (activity == ActivityType::GROOMING && m_stateMachine->getGroomingType() == GroomingType::SHAKE) {
+        // Shake affects spine and tail
+        if (spineIndex >= 0) {
+            BoneTransform& spineTrans = pose.getLocalTransform(spineIndex);
+            float shakeAngle = m_bodyRotation.x * m_activityWeight;  // Extract shake angle from rotation
+            glm::quat shakeTrans = glm::angleAxis(shakeAngle, glm::vec3(0, 0, 1));
+            spineTrans.rotation = glm::slerp(spineTrans.rotation,
+                                            spineTrans.rotation * shakeTrans,
+                                            m_activityWeight);
+        }
+
+        if (tailBaseIndex >= 0 && m_hasTail) {
+            BoneTransform& tailTrans = pose.getLocalTransform(tailBaseIndex);
+            float tailShake = m_bodyRotation.x * m_activityWeight * 1.5f;  // Tail shakes more
+            glm::quat tailShakeRot = glm::angleAxis(tailShake, glm::vec3(0, 1, 0));
+            tailTrans.rotation = glm::slerp(tailTrans.rotation,
+                                           tailTrans.rotation * tailShakeRot,
+                                           m_activityWeight);
+        }
+    }
+
+    // For eating/drinking, tilt head down
+    if ((activity == ActivityType::EATING || activity == ActivityType::DRINKING) && neckIndex >= 0) {
+        BoneTransform& neckTrans = pose.getLocalTransform(neckIndex);
+        glm::quat downTilt = glm::angleAxis(0.3f * m_activityWeight, glm::vec3(1, 0, 0));
+        neckTrans.rotation = glm::slerp(neckTrans.rotation,
+                                       neckTrans.rotation * downTilt,
+                                       m_activityWeight);
+    }
+
+    // For threat display, puff chest (spine extension)
+    if (activity == ActivityType::THREAT_DISPLAY && spineIndex >= 0) {
+        BoneTransform& spineTrans = pose.getLocalTransform(spineIndex);
+        glm::quat chestPuff = glm::angleAxis(-0.15f * m_activityWeight, glm::vec3(1, 0, 0));
+        spineTrans.rotation = glm::slerp(spineTrans.rotation,
+                                        spineTrans.rotation * chestPuff,
+                                        m_activityWeight);
+        spineTrans.translation.y += 0.05f * m_bodySize * m_activityWeight;
+    }
+
+    // For submissive display, crouch and lower head
+    if (activity == ActivityType::SUBMISSIVE_DISPLAY) {
+        if (spineIndex >= 0) {
+            BoneTransform& spineTrans = pose.getLocalTransform(spineIndex);
+            spineTrans.translation.y -= 0.1f * m_bodySize * m_activityWeight;
+        }
+        if (neckIndex >= 0) {
+            BoneTransform& neckTrans = pose.getLocalTransform(neckIndex);
+            glm::quat headDown = glm::angleAxis(0.4f * m_activityWeight, glm::vec3(1, 0, 0));
+            neckTrans.rotation = glm::slerp(neckTrans.rotation,
+                                           neckTrans.rotation * headDown,
+                                           m_activityWeight);
+        }
+    }
 }
 
 void ActivityAnimationDriver::generateIdleAnimation(float progress) {

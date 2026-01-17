@@ -6,13 +6,10 @@
 #include "imgui.h"
 #include "../entities/Creature.h"
 #include "../graphics/Camera.h"
+#include "../core/CreatureManager.h"
 #include <glm/glm.hpp>
 #include <vector>
 #include <functional>
-
-namespace Forge {
-class CreatureManager;
-}
 
 namespace ui {
 

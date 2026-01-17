@@ -3,6 +3,7 @@
 // This implementation is self-contained and does not depend on external height providers.
 
 #include "TerrainRenderer_DX12.h"
+#include "../../environment/TerrainSampler.h"
 #include <iostream>
 #include <cmath>
 #include <cstdlib>
@@ -283,58 +284,7 @@ bool TerrainRendererDX12::createChunkMeshes() {
 
 // Helper to generate height at a world position using procedural noise
 float TerrainRendererDX12::generateHeight(float worldX, float worldZ) const {
-    using namespace TerrainRendererConfig;
-    using namespace TerrainNoise;
-
-    // Normalize coordinates for noise sampling
-    float nx = worldX / static_cast<float>(WORLD_SIZE) + 0.5f;
-    float nz = worldZ / static_cast<float>(WORLD_SIZE) + 0.5f;
-
-    // Calculate distance from center for island falloff
-    float centerX = 0.5f;
-    float centerZ = 0.5f;
-    float dx = nx - centerX;
-    float dz = nz - centerZ;
-    float distance = std::sqrt(dx * dx + dz * dz) * 2.0f; // 0 at center, ~1 at corners
-
-    // Base continental shape - large scale features
-    float continental = octaveNoise(nx * 2.0f, nz * 2.0f, 4, 0.6f);
-
-    // Mountain ranges - medium scale with higher amplitude
-    float mountains = octaveNoise(nx * 4.0f + 100.0f, nz * 4.0f + 100.0f, 6, 0.5f);
-    mountains = std::pow(mountains, 1.5f); // Make peaks more dramatic
-
-    // Hills and valleys - fine detail
-    float hills = octaveNoise(nx * 8.0f + 50.0f, nz * 8.0f + 50.0f, 4, 0.5f);
-
-    // Ridge lines for mountain chains (creates sharp ridges)
-    float ridgeNoise = octaveNoise(nx * 3.0f + 200.0f, nz * 3.0f + 200.0f, 4, 0.5f);
-    float ridges = 1.0f - std::abs(ridgeNoise * 2.0f - 1.0f);
-    ridges = std::pow(ridges, 2.0f) * 0.3f;
-
-    // Combine layers with weights
-    float height = continental * 0.3f + mountains * 0.45f + hills * 0.15f + ridges;
-
-    // Create distinct elevation zones
-    // Low areas become water/beaches, high areas become mountains
-    if (height < 0.35f) {
-        // Flatten water areas slightly
-        height = height * 0.8f;
-    } else if (height > 0.7f) {
-        // Exaggerate mountain peaks
-        float excess = (height - 0.7f) / 0.3f;
-        height = 0.7f + excess * excess * 0.3f;
-    }
-
-    // Apply island factor (falloff at edges) - gentler falloff
-    float islandFactor = 1.0f - smoothstep(0.4f, 0.95f, distance);
-    height = height * islandFactor;
-
-    // Ensure we have both water (low values) and mountains (high values)
-    // Shift the range slightly to ensure variety
-    height = height * 1.1f - 0.05f;
-
-    return std::max(0.0f, std::min(1.0f, height));
+    return TerrainSampler::SampleHeightNormalized(worldX, worldZ);
 }
 
 bool TerrainRendererDX12::generateChunkMesh(
@@ -346,15 +296,14 @@ bool TerrainRendererDX12::generateChunkMesh(
 
     // Use simplified resolution for initial implementation (17 vertices per edge)
     const int resolution = 17;
-    const float chunkSize = static_cast<float>(CHUNK_SIZE);
-    const float heightScale = HEIGHT_SCALE;
+    const float worldSize = TerrainSampler::WORLD_SIZE;
+    const float chunkSize = worldSize / static_cast<float>(CHUNKS_PER_AXIS);
+    const float heightScale = TerrainSampler::HEIGHT_SCALE;
 
     // Calculate world offset for this chunk
     // World goes from -WORLD_SIZE/2 to +WORLD_SIZE/2
-    float worldOffsetX = static_cast<float>(chunkX * CHUNK_SIZE) -
-                         static_cast<float>(WORLD_SIZE) / 2.0f;
-    float worldOffsetZ = static_cast<float>(chunkZ * CHUNK_SIZE) -
-                         static_cast<float>(WORLD_SIZE) / 2.0f;
+    float worldOffsetX = static_cast<float>(chunkX) * chunkSize - worldSize * 0.5f;
+    float worldOffsetZ = static_cast<float>(chunkZ) * chunkSize - worldSize * 0.5f;
 
     const float step = chunkSize / static_cast<float>(resolution - 1);
 
@@ -522,9 +471,10 @@ void TerrainRendererDX12::updateConstants(
     constants.lightColor[3] = 1.0f; // Intensity
 
     // Terrain scale parameters
-    constants.terrainScale[0] = TerrainRendererConfig::HEIGHT_SCALE;
-    constants.terrainScale[1] = static_cast<float>(TerrainRendererConfig::CHUNK_SIZE);
-    constants.terrainScale[2] = TerrainRendererConfig::WATER_LEVEL;
+    float chunkSize = TerrainSampler::WORLD_SIZE / static_cast<float>(TerrainRendererConfig::CHUNKS_PER_AXIS);
+    constants.terrainScale[0] = TerrainSampler::HEIGHT_SCALE;
+    constants.terrainScale[1] = chunkSize;
+    constants.terrainScale[2] = TerrainSampler::WATER_LEVEL;
     constants.terrainScale[3] = time;
 
     // Texture coordinate scale

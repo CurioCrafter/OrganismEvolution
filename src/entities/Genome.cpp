@@ -3339,6 +3339,315 @@ void Genome::initializeForRegion(const RegionEvolutionConfig& config,
     }
 }
 
+// ============================================================================
+// VARIETY GENERATION (Phase 11 Agent 4)
+// ============================================================================
+
+// Forward declaration of BiomeType - must match BiomeSystem.h
+enum class BiomeType : uint8_t {
+    // Water biomes
+    DEEP_OCEAN = 0,
+    OCEAN,
+    SHALLOW_WATER,
+    CORAL_REEF,
+    KELP_FOREST,
+
+    // Coastal biomes
+    BEACH_SANDY,
+    BEACH_ROCKY,
+    TIDAL_POOL,
+    MANGROVE,
+    SALT_MARSH,
+
+    // Lowland biomes
+    GRASSLAND,
+    SAVANNA,
+    TROPICAL_RAINFOREST,
+    TEMPERATE_FOREST,
+    SWAMP,
+    WETLAND,
+
+    // Highland biomes
+    SHRUBLAND,
+    BOREAL_FOREST,
+    ALPINE_MEADOW,
+    ROCKY_HIGHLANDS,
+    MOUNTAIN_FOREST,
+
+    // Extreme biomes
+    DESERT_HOT,
+    DESERT_COLD,
+    TUNDRA,
+    GLACIER,
+    VOLCANIC,
+    LAVA_FIELD,
+    CRATER_LAKE,
+
+    // Special biomes
+    CAVE_ENTRANCE,
+    RIVER_BANK,
+    LAKE_SHORE,
+
+    BIOME_COUNT
+};
+
+EvolutionStartPreset Genome::selectPresetForBiome(BiomeType biome) {
+    // Map biomes to appropriate evolutionary starting points
+    switch (biome) {
+        // Extreme environments = earlier life forms
+        case BiomeType::DEEP_OCEAN:
+        case BiomeType::VOLCANIC:
+        case BiomeType::LAVA_FIELD:
+        case BiomeType::GLACIER:
+            return EvolutionStartPreset::PROTO;
+
+        // Harsh but viable = early multi-cellular
+        case BiomeType::DESERT_HOT:
+        case BiomeType::DESERT_COLD:
+        case BiomeType::TUNDRA:
+        case BiomeType::CRATER_LAKE:
+        case BiomeType::OCEAN:
+            return EvolutionStartPreset::EARLY_LIMB;
+
+        // Moderate environments = complex organisms
+        case BiomeType::GRASSLAND:
+        case BiomeType::SAVANNA:
+        case BiomeType::TEMPERATE_FOREST:
+        case BiomeType::BOREAL_FOREST:
+        case BiomeType::SHALLOW_WATER:
+        case BiomeType::BEACH_SANDY:
+        case BiomeType::BEACH_ROCKY:
+        case BiomeType::WETLAND:
+        case BiomeType::SWAMP:
+        case BiomeType::SHRUBLAND:
+        case BiomeType::ALPINE_MEADOW:
+        case BiomeType::ROCKY_HIGHLANDS:
+            return EvolutionStartPreset::COMPLEX;
+
+        // Rich ecosystems = advanced life
+        case BiomeType::TROPICAL_RAINFOREST:
+        case BiomeType::CORAL_REEF:
+        case BiomeType::KELP_FOREST:
+        case BiomeType::MANGROVE:
+        case BiomeType::SALT_MARSH:
+        case BiomeType::TIDAL_POOL:
+        case BiomeType::MOUNTAIN_FOREST:
+        case BiomeType::CAVE_ENTRANCE:
+        case BiomeType::RIVER_BANK:
+        case BiomeType::LAKE_SHORE:
+            return EvolutionStartPreset::ADVANCED;
+
+        default:
+            return EvolutionStartPreset::COMPLEX;
+    }
+}
+
+EvolutionGuidanceBias Genome::selectBiasForBiome(BiomeType biome, float varietySeed) {
+    // Deterministic variety using seed for different niches in same biome
+    uint32_t seed = static_cast<uint32_t>(varietySeed * 100.0f);
+
+    // Water biomes = aquatic bias
+    if (biome >= BiomeType::DEEP_OCEAN && biome <= BiomeType::KELP_FOREST) {
+        return EvolutionGuidanceBias::AQUATIC;
+    }
+
+    // Coastal biomes = mix of aquatic and land
+    if (biome >= BiomeType::BEACH_SANDY && biome <= BiomeType::SALT_MARSH) {
+        return (seed % 3 == 0) ? EvolutionGuidanceBias::AQUATIC : EvolutionGuidanceBias::LAND;
+    }
+
+    // Special aquatic biomes
+    if (biome == BiomeType::RIVER_BANK || biome == BiomeType::LAKE_SHORE) {
+        return (seed % 2 == 0) ? EvolutionGuidanceBias::AQUATIC : EvolutionGuidanceBias::LAND;
+    }
+
+    // Highland biomes = mix of land and flight
+    if (biome >= BiomeType::SHRUBLAND && biome <= BiomeType::MOUNTAIN_FOREST) {
+        if (seed % 4 == 0) return EvolutionGuidanceBias::FLIGHT;
+        return EvolutionGuidanceBias::LAND;
+    }
+
+    // Extreme cold = underground adaptations
+    if (biome == BiomeType::TUNDRA || biome == BiomeType::GLACIER ||
+        biome == BiomeType::DESERT_COLD || biome == BiomeType::CAVE_ENTRANCE) {
+        return (seed % 3 == 0) ? EvolutionGuidanceBias::UNDERGROUND : EvolutionGuidanceBias::LAND;
+    }
+
+    // Most other biomes = primarily land with some flyers
+    if (seed % 5 == 0) return EvolutionGuidanceBias::FLIGHT;
+    if (seed % 7 == 0) return EvolutionGuidanceBias::UNDERGROUND;
+
+    return EvolutionGuidanceBias::LAND;
+}
+
+void Genome::initializeForBiome(BiomeType biome,
+                                const PlanetChemistry& chemistry,
+                                float varietySeed) {
+    // Select preset and bias based on biome
+    EvolutionStartPreset preset = selectPresetForBiome(biome);
+    EvolutionGuidanceBias bias = selectBiasForBiome(biome, varietySeed);
+
+    // Initialize with selected configuration
+    initializeForPreset(preset, bias, chemistry);
+
+    // Apply additional variety mutations to prevent identical creatures
+    applyVarietyMutations(0.3f + varietySeed * 0.2f);
+}
+
+void Genome::applyVarietyMutations(float varietyStrength) {
+    // Apply cosmetic and morphological variety without drastically affecting fitness
+    // This creates visual diversity while maintaining viability
+
+    // Clamp variety strength to reasonable bounds
+    varietyStrength = std::clamp(varietyStrength, 0.0f, 0.5f);
+
+    // Color variety (purely cosmetic)
+    color.r = std::clamp(color.r + Random::range(-varietyStrength, varietyStrength), 0.0f, 1.0f);
+    color.g = std::clamp(color.g + Random::range(-varietyStrength, varietyStrength), 0.0f, 1.0f);
+    color.b = std::clamp(color.b + Random::range(-varietyStrength, varietyStrength), 0.0f, 1.0f);
+
+    // Size variety (affects balance but within safe range)
+    float sizeVariation = Random::range(-0.15f, 0.15f) * varietyStrength;
+    size = std::clamp(size + sizeVariation, 0.5f, 2.0f);
+
+    // Speed variety (compensate with efficiency to maintain fitness)
+    float speedVariation = Random::range(-2.0f, 2.0f) * varietyStrength;
+    speed = std::clamp(speed + speedVariation, 5.0f, 20.0f);
+
+    // Compensate speed changes with efficiency adjustments
+    if (speedVariation > 0) {
+        efficiency = std::clamp(efficiency - speedVariation * 0.01f, 0.5f, 1.5f);
+    }
+
+    // Morphology variety (body segments, limbs, etc.)
+    if (Random::chance(varietyStrength)) {
+        segmentCount = std::clamp(static_cast<uint8_t>(segmentCount + Random::rangeInt(-1, 1)),
+                                  static_cast<uint8_t>(1), static_cast<uint8_t>(8));
+    }
+
+    if (Random::chance(varietyStrength)) {
+        bodyAspect = std::clamp(bodyAspect + Random::range(-0.3f, 0.3f) * varietyStrength, 0.3f, 3.0f);
+    }
+
+    // Appendage variety
+    if (Random::chance(varietyStrength * 0.5f)) {
+        dorsalFinCount = std::clamp(static_cast<uint8_t>(dorsalFinCount + Random::rangeInt(-1, 1)),
+                                    static_cast<uint8_t>(0), static_cast<uint8_t>(3));
+    }
+
+    if (Random::chance(varietyStrength * 0.5f)) {
+        hornCount = std::clamp(static_cast<uint8_t>(hornCount + Random::rangeInt(-1, 2)),
+                               static_cast<uint8_t>(0), static_cast<uint8_t>(6));
+    }
+
+    // Pattern variety (cosmetic)
+    if (Random::chance(varietyStrength)) {
+        patternType = Random::rangeInt(0, 4);
+        patternIntensity = Random::range(0.2f, 0.8f);
+        patternFrequency = Random::range(1.0f, 10.0f);
+    }
+
+    // Crest and display feature variety
+    if (Random::chance(varietyStrength * 0.6f)) {
+        crestHeight = Random::range(0.0f, 0.5f);
+        crestType = Random::rangeInt(0, 4);
+    }
+
+    // Tail variety
+    if (Random::chance(varietyStrength * 0.5f)) {
+        tailVariant = Random::rangeInt(0, 6);
+        tailLength = std::clamp(tailLength + Random::range(-0.2f, 0.2f) * varietyStrength, 0.2f, 1.5f);
+    }
+
+    // Eye arrangement variety (cosmetic but affects appearance significantly)
+    if (Random::chance(varietyStrength * 0.4f)) {
+        eyeArrangement = Random::rangeInt(0, 4);
+    }
+
+    // Shell/armor variety
+    if (Random::chance(varietyStrength * 0.3f)) {
+        shellCoverage = std::clamp(shellCoverage + Random::range(-0.2f, 0.2f) * varietyStrength, 0.0f, 1.0f);
+    }
+}
+
+Genome::DiversityMetrics Genome::calculatePopulationDiversity(const std::vector<Genome>& population) {
+    if (population.empty()) {
+        return {0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+    }
+
+    DiversityMetrics metrics;
+
+    // Calculate means
+    float meanSize = 0.0f, meanSpeed = 0.0f;
+    float meanColorR = 0.0f, meanColorG = 0.0f, meanColorB = 0.0f;
+    float meanSegments = 0.0f, meanAspect = 0.0f, meanHorns = 0.0f;
+
+    for (const auto& genome : population) {
+        meanSize += genome.size;
+        meanSpeed += genome.speed;
+        meanColorR += genome.color.r;
+        meanColorG += genome.color.g;
+        meanColorB += genome.color.b;
+        meanSegments += genome.segmentCount;
+        meanAspect += genome.bodyAspect;
+        meanHorns += genome.hornCount;
+    }
+
+    float n = static_cast<float>(population.size());
+    meanSize /= n;
+    meanSpeed /= n;
+    meanColorR /= n;
+    meanColorG /= n;
+    meanColorB /= n;
+    meanSegments /= n;
+    meanAspect /= n;
+    meanHorns /= n;
+
+    // Calculate variances
+    float varSize = 0.0f, varSpeed = 0.0f, varColor = 0.0f;
+    float varSegments = 0.0f, varAspect = 0.0f, varHorns = 0.0f;
+
+    for (const auto& genome : population) {
+        float diffSize = genome.size - meanSize;
+        float diffSpeed = genome.speed - meanSpeed;
+        float diffColorR = genome.color.r - meanColorR;
+        float diffColorG = genome.color.g - meanColorG;
+        float diffColorB = genome.color.b - meanColorB;
+        float diffSegments = genome.segmentCount - meanSegments;
+        float diffAspect = genome.bodyAspect - meanAspect;
+        float diffHorns = genome.hornCount - meanHorns;
+
+        varSize += diffSize * diffSize;
+        varSpeed += diffSpeed * diffSpeed;
+        varColor += diffColorR * diffColorR + diffColorG * diffColorG + diffColorB * diffColorB;
+        varSegments += diffSegments * diffSegments;
+        varAspect += diffAspect * diffAspect;
+        varHorns += diffHorns * diffHorns;
+    }
+
+    varSize /= n;
+    varSpeed /= n;
+    varColor /= (n * 3.0f);  // Average across RGB
+
+    float varMorphology = (varSegments + varAspect + varHorns) / (n * 3.0f);
+
+    // Normalize variances to 0-1 range (using expected max variances)
+    metrics.sizeVariance = std::min(1.0f, varSize / 0.25f);  // Max variance ≈ 0.25 for size range 0.5-2.0
+    metrics.speedVariance = std::min(1.0f, varSpeed / 25.0f);  // Max variance ≈ 25 for speed range 5-20
+    metrics.colorVariance = std::min(1.0f, varColor);
+    metrics.morphologyVariance = std::min(1.0f, varMorphology);
+
+    // Overall diversity score (weighted average)
+    metrics.overallDiversity = (
+        metrics.sizeVariance * 0.2f +
+        metrics.speedVariance * 0.2f +
+        metrics.colorVariance * 0.3f +
+        metrics.morphologyVariance * 0.3f
+    );
+
+    return metrics;
+}
+
 void Genome::adaptToChemistry(const PlanetChemistry& chemistry) {
     // Adapt solvent affinity to planet's primary solvent
     switch (chemistry.solventType) {

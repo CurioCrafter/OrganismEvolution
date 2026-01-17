@@ -347,6 +347,9 @@ public:
     void updateColorGrading(float timeOfDay);
     void setColorGradingPreset(float dawn, float noon, float dusk, float night);
 
+    // Integrate PlanetTheme colors (should be called when planet theme changes)
+    void integrateThemeColors(const class PlanetTheme* theme);
+
     // ========================================================================
     // Debug Options
     // ========================================================================

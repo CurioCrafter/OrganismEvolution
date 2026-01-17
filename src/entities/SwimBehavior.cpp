@@ -1,13 +1,10 @@
 #include "SwimBehavior.h"
 #include "../environment/Terrain.h"
+#include "../environment/TerrainSampler.h"
 #include "Creature.h"
 #include "CreatureType.h"
 #include <algorithm>
 #include <cmath>
-
-// Water level constant - MUST match terrain waterLevel (0.35f) * heightScale (30.0f) = 10.5f
-// This is the Y coordinate where the water surface is located in world space
-static constexpr float WATER_SURFACE_HEIGHT = 10.5f;
 
 SwimBehavior::SwimBehavior() : m_config() {}
 
@@ -23,14 +20,14 @@ bool SwimBehavior::isInWater(const glm::vec3& pos, const Terrain& terrain) {
 
 // Static helper to get the water surface height constant
 float SwimBehavior::getWaterLevelConstant() {
-    return WATER_SURFACE_HEIGHT;
+    return TerrainSampler::GetWaterHeight();
 }
 
 float SwimBehavior::getWaterSurfaceHeight(float x, float z, const Terrain& terrain) {
     (void)x; (void)z; (void)terrain;
     // For now, use a constant water level
     // In a more advanced system, this could vary with waves
-    return WATER_SURFACE_HEIGHT;
+    return TerrainSampler::GetWaterHeight();
 }
 
 float SwimBehavior::getWaterDepth(const glm::vec3& pos, const Terrain& terrain) {
@@ -41,7 +38,8 @@ float SwimBehavior::getWaterDepth(const glm::vec3& pos, const Terrain& terrain) 
 float SwimBehavior::getSeaFloorHeight(float x, float z, const Terrain& terrain) {
     float terrainHeight = terrain.getHeight(x, z);
     // Sea floor is terrain height, but capped at water level
-    return std::min(terrainHeight, WATER_SURFACE_HEIGHT - 0.5f);
+    float waterSurface = TerrainSampler::GetWaterHeight();
+    return std::min(terrainHeight, waterSurface - 0.5f);
 }
 
 glm::vec3 SwimBehavior::calculateBuoyancy(
@@ -753,8 +751,6 @@ void SwimBehavior::updateOxygenLevel(
         oxygenLevel = 1.0f; // Gill breathers always have oxygen
         return;
     }
-
-    float waterSurface = WATER_SURFACE_HEIGHT;
 
     if (currentDepth <= 0.5f) {
         // At surface - replenish oxygen

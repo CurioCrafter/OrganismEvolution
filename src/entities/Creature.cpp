@@ -1,6 +1,7 @@
 #include "Creature.h"
 #include "SwimBehavior.h"
 #include "SpeciesNameGenerator.h"
+#include "behaviors/BehaviorCoordinator.h"
 #include "../environment/Terrain.h"
 #include "../utils/SpatialGrid.h"
 #include "../utils/Random.h"
@@ -10,6 +11,39 @@
 #include <cmath>
 #include <algorithm>
 #include <iostream>
+#include <fstream>
+#include <filesystem>
+#include <mutex>
+#include <chrono>
+#include <ctime>
+
+namespace {
+std::string GetCreatureDiagTimestamp() {
+    auto now = std::chrono::system_clock::now();
+    std::time_t nowTime = std::chrono::system_clock::to_time_t(now);
+    std::tm localTime{};
+#ifdef _WIN32
+    localtime_s(&localTime, &nowTime);
+#else
+    localtime_r(&nowTime, &localTime);
+#endif
+    char buffer[64];
+    std::strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S", &localTime);
+    return std::string(buffer);
+}
+
+void AppendCreatureDiagLog(const std::string& message) {
+    static std::mutex s_logMutex;
+    std::lock_guard<std::mutex> lock(s_logMutex);
+    std::filesystem::create_directories("logs");
+    std::ofstream logFile("logs/creature_diag.log", std::ios::app);
+    if (!logFile) {
+        return;
+    }
+    logFile << "[" << GetCreatureDiagTimestamp() << "] " << message << "\n";
+    logFile.flush();
+}
+}  // namespace
 
 // Thread-safe static ID counter - uses atomic for future multi-threading support
 std::atomic<int> Creature::nextID{1};
@@ -46,7 +80,8 @@ Creature::Creature(const glm::vec3& position, const Genome& genome, CreatureType
       energy(100.0f), age(0.0f), alive(true), sterile(false), fitnessModifier(1.0f),
       generation(0), id(nextID++),
       fitness(0.0f), foodEaten(0), distanceTraveled(0.0f),
-      fear(0.0f), huntingCooldown(0.0f), killCount(0), beingHunted(false) {
+      fear(0.0f), huntingCooldown(0.0f), killCount(0), beingHunted(false),
+      m_lastRotation(0.0f) {  // PHASE 11 - Agent 9: Initialize rotation tracking
 
     brain = std::make_unique<NeuralNetwork>(genome.neuralWeights);
 
@@ -75,7 +110,8 @@ Creature::Creature(const glm::vec3& position, const Genome& parent1, const Genom
       energy(100.0f), age(0.0f), alive(true), sterile(false), fitnessModifier(1.0f),
       generation(0), id(nextID++),
       fitness(0.0f), foodEaten(0), distanceTraveled(0.0f),
-      fear(0.0f), huntingCooldown(0.0f), killCount(0), beingHunted(false) {
+      fear(0.0f), huntingCooldown(0.0f), killCount(0), beingHunted(false),
+      m_lastRotation(0.0f) {  // PHASE 11 - Agent 9: Initialize rotation tracking
 
     brain = std::make_unique<NeuralNetwork>(genome.neuralWeights);
 
@@ -136,7 +172,8 @@ Creature::Creature(const glm::vec3& position, const genetics::DiploidGenome& dg,
       energy(100.0f), age(0.0f), alive(true), sterile(false), fitnessModifier(1.0f),
       generation(0), id(nextID++),
       fitness(0.0f), foodEaten(0), distanceTraveled(0.0f),
-      fear(0.0f), huntingCooldown(0.0f), killCount(0), beingHunted(false) {
+      fear(0.0f), huntingCooldown(0.0f), killCount(0), beingHunted(false),
+      m_lastRotation(0.0f) {  // PHASE 11 - Agent 9: Initialize rotation tracking
 
     brain = std::make_unique<NeuralNetwork>(genome.neuralWeights);
 
@@ -171,7 +208,8 @@ Creature::Creature(const glm::vec3& position, const genetics::DiploidGenome& par
       energy(100.0f), age(0.0f), alive(true), sterile(false), fitnessModifier(1.0f),
       generation(0), id(nextID++),
       fitness(0.0f), foodEaten(0), distanceTraveled(0.0f),
-      fear(0.0f), huntingCooldown(0.0f), killCount(0), beingHunted(false) {
+      fear(0.0f), huntingCooldown(0.0f), killCount(0), beingHunted(false),
+      m_lastRotation(0.0f) {  // PHASE 11 - Agent 9: Initialize rotation tracking
 
     // Sync legacy genome from new diploid genome - MUST be first
     genome = syncGenomeFromDiploid(diploidGenome);
@@ -210,12 +248,17 @@ void Creature::update(float deltaTime, const Terrain& terrain,
                       const std::vector<Creature*>& otherCreatures,
                       const SpatialGrid* spatialGrid,
                       const EnvironmentConditions* envConditions,
-                      const std::vector<SoundEvent>* sounds) {
+                      const std::vector<SoundEvent>* sounds,
+                      BehaviorCoordinator* behaviorCoordinator) {
     if (!alive) return;
 
     age += deltaTime;
     currentTime += deltaTime;
     m_timeSinceLastMeal += deltaTime;  // Track hunger duration
+    const bool debugCreature = (id == 1 && currentTime < 0.2f);
+    if (debugCreature) {
+        AppendCreatureDiagLog("Creature update begin id=1");
+    }
 
     // Reduce hunting cooldown
     if (huntingCooldown > 0.0f) {
@@ -259,6 +302,9 @@ void Creature::update(float deltaTime, const Terrain& terrain,
         alive = false;
         return;
     }
+    if (debugCreature) {
+        AppendCreatureDiagLog("Creature energy update done id=1");
+    }
 
     // Update sensory system
     EnvironmentConditions defaultEnv;
@@ -278,12 +324,21 @@ void Creature::update(float deltaTime, const Terrain& terrain,
         soundEvents,
         currentTime
     );
+    if (debugCreature) {
+        AppendCreatureDiagLog("Creature sensory end id=1");
+    }
 
     // Update spatial memory based on sensory percepts
     sensory.updateMemory(deltaTime);
+    if (debugCreature) {
+        AppendCreatureDiagLog("Creature memory updated id=1");
+    }
 
     // Update behavior influenced by sensory data
     updateSensoryBehavior(deltaTime, otherCreatures);
+    if (debugCreature) {
+        AppendCreatureDiagLog("Creature sensory behavior updated id=1");
+    }
 
     // =========================================================================
     // NEURAL NETWORK BEHAVIOR MODULATION
@@ -291,42 +346,94 @@ void Creature::update(float deltaTime, const Terrain& terrain,
     // The neural network outputs modulate aggression, fear, social, exploration
     // =========================================================================
     updateNeuralBehavior(foodPositions, otherCreatures);
+    if (debugCreature) {
+        AppendCreatureDiagLog("Creature neural behavior updated id=1");
+    }
 
     // Update behavior based on creature type
     if (type == CreatureType::HERBIVORE) {
-        updateBehaviorHerbivore(deltaTime, foodPositions, otherCreatures, spatialGrid);
+        if (debugCreature) {
+            AppendCreatureDiagLog("Creature herbivore behavior begin id=1");
+        }
+        updateBehaviorHerbivore(deltaTime, foodPositions, otherCreatures, spatialGrid, behaviorCoordinator);
         updatePhysics(deltaTime, terrain);
+        if (debugCreature) {
+            AppendCreatureDiagLog("Creature herbivore behavior end id=1");
+        }
     } else if (isAquatic(type)) {
         // All aquatic types use the aquatic behavior system
+        if (debugCreature) {
+            AppendCreatureDiagLog("Creature aquatic behavior begin id=1");
+        }
         updateBehaviorAquatic(deltaTime, otherCreatures, spatialGrid);
         // Aquatic creatures handle their own physics
+        if (debugCreature) {
+            AppendCreatureDiagLog("Creature aquatic behavior end id=1");
+        }
     } else if (isFlying(type)) {
+        if (debugCreature) {
+            AppendCreatureDiagLog("Creature flying behavior begin id=1");
+        }
         updateBehaviorFlying(deltaTime, terrain, foodPositions, otherCreatures, spatialGrid);
         updateFlyingPhysics(deltaTime, terrain);
+        if (debugCreature) {
+            AppendCreatureDiagLog("Creature flying behavior end id=1");
+        }
     } else {
+        if (debugCreature) {
+            AppendCreatureDiagLog("Creature carnivore behavior begin id=1");
+        }
         updateBehaviorCarnivore(deltaTime, otherCreatures, spatialGrid);
         updatePhysics(deltaTime, terrain);
+        if (debugCreature) {
+            AppendCreatureDiagLog("Creature carnivore behavior end id=1");
+        }
     }
 
     // Calculate fitness
     calculateFitness();
+    if (debugCreature) {
+        AppendCreatureDiagLog("Creature fitness calculated id=1");
+    }
 
     // Update physiological state for activity triggers
     updatePhysiologicalState(deltaTime);
+    if (debugCreature) {
+        AppendCreatureDiagLog("Creature physiology updated id=1");
+    }
 
     // Update activity system (eating, mating, sleeping, grooming, etc.)
     updateActivitySystem(deltaTime, foodPositions, otherCreatures);
+    if (debugCreature) {
+        AppendCreatureDiagLog("Creature activity updated id=1");
+    }
 
     // Update animation system
     m_terrainPtr = &terrain;  // Store terrain pointer for ground raycasting
+    if (debugCreature) {
+        AppendCreatureDiagLog("Creature animation begin id=1");
+    }
     updateAnimation(deltaTime);
+    if (debugCreature) {
+        AppendCreatureDiagLog("Creature animation end id=1");
+    }
 }
 
 void Creature::updateBehaviorHerbivore(float deltaTime,
                                         const std::vector<glm::vec3>& foodPositions,
                                         const std::vector<Creature*>& otherCreatures,
-                                        const SpatialGrid* grid) {
+                                        const SpatialGrid* grid,
+                                        BehaviorCoordinator* behaviorCoordinator) {
     glm::vec3 steeringForce(0.0f);
+
+    // =========================================================================
+    // PHASE 10 - Agent 4: BEHAVIOR COORDINATOR FORCES
+    // High-level emergent behaviors (territorial, social groups, pack hunting, etc.)
+    // =========================================================================
+    glm::vec3 behaviorForce(0.0f);
+    if (behaviorCoordinator) {
+        behaviorForce = behaviorCoordinator->calculateBehaviorForces(this);
+    }
 
     // =========================================================================
     // NEURAL NETWORK DRIVES BEHAVIOR (PRIMARY)
@@ -457,13 +564,28 @@ void Creature::updateBehaviorHerbivore(float deltaTime,
         }
     }
 
+    // =========================================================================
+    // PHASE 10 - Agent 4: BLEND BEHAVIOR COORDINATOR FORCES
+    // Blend high-level emergent behavior forces with low-level steering
+    // =========================================================================
+    if (glm::length(behaviorForce) > 0.01f) {
+        // Behavior forces have moderate influence (0.4 weight)
+        // Lower than survival behaviors but higher than idle wandering
+        steeringForce += behaviorForce * 0.4f;
+    }
+
     // Apply steering force to velocity
     velocity = steering.applyForce(velocity, steeringForce, deltaTime);
 
-    // Update rotation to face movement direction
+    // PHASE 11 - Agent 9: Smooth rotation update (prevents spinning)
     if (glm::length(velocity) > 0.1f) {
-        rotation = atan2(velocity.z, velocity.x);
+        float targetRotation = atan2(velocity.z, velocity.x);
+        float maxTurnRate = 5.0f;  // radians/sec (about 286 deg/s)
+        updateRotationSmooth(targetRotation, deltaTime, maxTurnRate);
     }
+
+    // Update rotation diagnostics
+    updateRotationDiagnostics(deltaTime);
 
     // Reset speed boost
     SteeringBehaviors::Config config = steering.getConfig();
@@ -573,10 +695,15 @@ void Creature::updateBehaviorCarnivore(float deltaTime,
     // Apply steering force to velocity
     velocity = steering.applyForce(velocity, steeringForce, deltaTime);
 
-    // Update rotation to face movement direction
+    // PHASE 11 - Agent 9: Smooth rotation update (prevents spinning)
     if (glm::length(velocity) > 0.1f) {
-        rotation = atan2(velocity.z, velocity.x);
+        float targetRotation = atan2(velocity.z, velocity.x);
+        float maxTurnRate = 6.0f;  // radians/sec (carnivores turn faster for hunting)
+        updateRotationSmooth(targetRotation, deltaTime, maxTurnRate);
     }
+
+    // Update rotation diagnostics
+    updateRotationDiagnostics(deltaTime);
 
     // Reset speed
     SteeringBehaviors::Config config = steering.getConfig();
@@ -859,10 +986,15 @@ void Creature::updateBehaviorAquatic(float deltaTime, const std::vector<Creature
     // Clamp to water bounds
     position.y = std::clamp(position.y, WATER_FLOOR + 0.5f, WATER_LEVEL - 0.5f);
 
-    // Update rotation to face movement direction
+    // PHASE 11 - Agent 9: Smooth rotation update (prevents spinning)
     if (glm::length(glm::vec2(velocity.x, velocity.z)) > 0.1f) {
-        rotation = atan2(velocity.x, velocity.z);
+        float targetRotation = atan2(velocity.x, velocity.z);
+        float maxTurnRate = 7.0f;  // radians/sec (fish can turn quickly in water)
+        updateRotationSmooth(targetRotation, deltaTime, maxTurnRate);
     }
+
+    // Update rotation diagnostics
+    updateRotationDiagnostics(deltaTime);
 
     // === ENERGY CONSUMPTION ===
     float energyCost = 0.5f;  // Base cost
@@ -949,10 +1081,101 @@ void Creature::updatePhysics(float deltaTime, const Terrain& terrain) {
 
     // Stay on terrain (avoid water)
     if (terrain.isWater(position.x, position.z)) {
+        // PHASE 11 - Agent 9: Gentler bounce to prevent instant rotation flip
+        // Old: velocity *= -0.5f - instant 180° direction change causes spinning
+        // New: Reflect only the component toward water, preserve tangential motion
         position = oldPos;
-        velocity *= -0.5f;  // Bounce back
+
+        // Calculate direction away from water (toward land)
+        glm::vec3 awayFromWater = glm::normalize(oldPos - position);
+        awayFromWater.y = 0.0f;  // Keep horizontal
+
+        // Decompose velocity into normal (toward water) and tangential (parallel to shore)
+        float normalComponent = glm::dot(velocity, -awayFromWater);
+        if (normalComponent > 0) {  // Only if moving toward water
+            // Reverse normal component with damping, keep tangential
+            glm::vec3 tangentialVel = velocity + awayFromWater * normalComponent;
+            velocity = tangentialVel - awayFromWater * normalComponent * 0.3f;
+        }
     } else {
         position.y = terrain.getHeight(position.x, position.z) + genome.size;
+    }
+}
+
+// =============================================================================
+// PHASE 11 - AGENT 9: ROTATION STABILITY
+// =============================================================================
+
+void Creature::updateRotationSmooth(float targetRotation, float deltaTime, float maxTurnRate) {
+    // Normalize target rotation to [-PI, PI]
+    while (targetRotation > 3.14159f) targetRotation -= 6.28318f;
+    while (targetRotation < -3.14159f) targetRotation += 6.28318f;
+
+    // Calculate shortest rotation difference
+    float rotationDiff = targetRotation - rotation;
+    while (rotationDiff > 3.14159f) rotationDiff -= 6.28318f;
+    while (rotationDiff < -3.14159f) rotationDiff += 6.28318f;
+
+    // Clamp rotation rate to maximum turn rate (prevents spinning)
+    float maxRotationChange = maxTurnRate * deltaTime;
+    rotationDiff = std::clamp(rotationDiff, -maxRotationChange, maxRotationChange);
+
+    // Apply damped rotation (smoother than instant snap)
+    // Use lerp-style damping: moves partway toward target each frame
+    float damping = 0.15f;  // Higher = slower rotation, more stable
+    rotation += rotationDiff * damping / deltaTime * deltaTime;
+
+    // Normalize rotation to [-PI, PI]
+    while (rotation > 3.14159f) rotation -= 6.28318f;
+    while (rotation < -3.14159f) rotation += 6.28318f;
+}
+
+void Creature::updateRotationDiagnostics(float deltaTime) {
+    if (deltaTime < 0.0001f) return;  // Avoid division by zero
+
+    // Calculate angular velocity (radians per second)
+    float rotationChange = rotation - m_lastRotation;
+
+    // Normalize angle difference
+    while (rotationChange > 3.14159f) rotationChange -= 6.28318f;
+    while (rotationChange < -3.14159f) rotationChange += 6.28318f;
+
+    m_angularVelocity = rotationChange / deltaTime;
+    m_lastRotation = rotation;
+
+    // Track maximum angular velocity for diagnostics
+    float absAngularVel = std::abs(m_angularVelocity);
+    if (absAngularVel > m_maxAngularVelocity) {
+        m_maxAngularVelocity = absAngularVel;
+    }
+
+    // Detect spinning (sustained high angular velocity)
+    const float spinningThreshold = 10.0f;  // rad/s (about 570 deg/s)
+    if (absAngularVel > spinningThreshold) {
+        m_spinningFrames++;
+
+        // Log spinning creatures for debugging
+        if (m_spinningFrames == 10) {  // Log once when spinning starts
+            AppendCreatureDiagLog("SPINNING DETECTED: Creature " + std::to_string(id) +
+                " angular velocity = " + std::to_string(absAngularVel) + " rad/s");
+        }
+    } else {
+        m_spinningFrames = 0;
+    }
+
+    // Calculate rotation stability metric (0 = spinning, 1 = stable)
+    // Uses exponential decay: recent spinning lowers stability
+    const float targetStability = (absAngularVel < spinningThreshold) ? 1.0f : 0.0f;
+    const float stabilityRecoveryRate = 2.0f;  // How fast stability recovers
+    m_rotationStability += (targetStability - m_rotationStability) * stabilityRecoveryRate * deltaTime;
+    m_rotationStability = std::clamp(m_rotationStability, 0.0f, 1.0f);
+
+    // Kill creature if spinning persists (death spiral prevention)
+    if (m_spinningFrames > 60) {  // 60 frames = 1 second at 60fps
+        AppendCreatureDiagLog("DEATH BY SPINNING: Creature " + std::to_string(id) +
+            " spinning for " + std::to_string(m_spinningFrames) + " frames");
+        alive = false;
+        energy = 0.0f;
     }
 }
 
@@ -1859,16 +2082,15 @@ void Creature::updateBehaviorFlying(float deltaTime, const Terrain& terrain,
         velocity += forward * (minSpeed - speed);
     }
 
-    // Update rotation to face movement direction (bank into turns)
+    // PHASE 11 - Agent 9: Smooth rotation update (prevents spinning)
     if (glm::length(glm::vec2(velocity.x, velocity.z)) > 0.5f) {
         float targetRotation = atan2(velocity.z, velocity.x);
-        // Smooth rotation (birds bank into turns)
-        float rotationDiff = targetRotation - rotation;
-        // Normalize angle difference
-        while (rotationDiff > 3.14159f) rotationDiff -= 6.28318f;
-        while (rotationDiff < -3.14159f) rotationDiff += 6.28318f;
-        rotation += rotationDiff * deltaTime * 3.0f;
+        float maxTurnRate = 4.0f;  // radians/sec (birds bank smoothly, slower turns)
+        updateRotationSmooth(targetRotation, deltaTime, maxTurnRate);
     }
+
+    // Update rotation diagnostics
+    updateRotationDiagnostics(deltaTime);
 }
 
 void Creature::updateFlyingPhysics(float deltaTime, const Terrain& terrain) {
@@ -1904,15 +2126,20 @@ void Creature::updateFlyingPhysics(float deltaTime, const Terrain& terrain) {
     float halfWidth = 150.0f;
     float halfDepth = 150.0f;
 
+    // PHASE 11 - Agent 9: Gentler boundary reflection for flying creatures
+    // Store old position before clamping
+    glm::vec3 beforeClamp = position;
     position.x = std::clamp(position.x, -halfWidth + 5.0f, halfWidth - 5.0f);
     position.z = std::clamp(position.z, -halfDepth + 5.0f, halfDepth - 5.0f);
 
-    // If clamped to boundary, reflect velocity
-    if (std::abs(position.x) >= halfWidth - 5.0f) {
-        velocity.x *= -0.5f;
+    // If clamped, reflect velocity gently (not instant flip)
+    if (beforeClamp.x != position.x) {
+        // Hit X boundary - reverse X velocity with damping
+        velocity.x *= -0.3f;  // Gentler bounce (was -0.5f)
     }
-    if (std::abs(position.z) >= halfDepth - 5.0f) {
-        velocity.z *= -0.5f;
+    if (beforeClamp.z != position.z) {
+        // Hit Z boundary - reverse Z velocity with damping
+        velocity.z *= -0.3f;  // Gentler bounce (was -0.5f)
     }
 }
 
@@ -1969,6 +2196,16 @@ void Creature::initializeAnimation() {
             }
         );
     }
+
+    // Connect activity system to animator
+    m_animator.setActivityStateMachine(&m_activitySystem);
+
+    // Configure activity driver morphology
+    auto& activityDriver = m_animator.getActivityDriver();
+    activityDriver.setBodySize(genome.size);
+    activityDriver.setHasWings(isFlying(type));
+    activityDriver.setHasTail(true);  // Most creatures have tails
+    activityDriver.setHasCrest(genome.displayIntensity > 0.6f);
 }
 
 void Creature::updateAnimation(float deltaTime) {
@@ -2010,7 +2247,13 @@ void Creature::updateAnimation(float deltaTime) {
         }
     }
 
-    // Update animation
+    // Update activity animation targets
+    auto& activityDriver = m_animator.getActivityDriver();
+    activityDriver.setFoodPosition(m_nearestFoodPos);
+    activityDriver.setMatePosition(m_nearestMatePos);
+    activityDriver.setGroundPosition(position);
+
+    // Update animation (includes locomotion + activity blending)
     m_animator.update(deltaTime);
 }
 

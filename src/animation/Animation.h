@@ -7,6 +7,7 @@
 #include "Pose.h"
 #include "IKSolver.h"
 #include "ProceduralLocomotion.h"
+#include "ActivitySystem.h"
 
 namespace animation {
 
@@ -53,6 +54,15 @@ public:
     const IKSystem& getIKSystem() const { return m_ikSystem; }
     IKSystem& getIKSystem() { return m_ikSystem; }
 
+    // Access activity animation driver
+    const ActivityAnimationDriver& getActivityDriver() const { return m_activityDriver; }
+    ActivityAnimationDriver& getActivityDriver() { return m_activityDriver; }
+
+    // Set activity state machine (called by Creature)
+    void setActivityStateMachine(ActivityStateMachine* stateMachine) {
+        m_activityDriver.setStateMachine(stateMachine);
+    }
+
     // Update animation (call each frame)
     void update(float deltaTime);
 
@@ -76,6 +86,7 @@ private:
     SkeletonPose m_pose;
     ProceduralLocomotion m_locomotion;
     IKSystem m_ikSystem;
+    ActivityAnimationDriver m_activityDriver;
 
     glm::vec3 m_position{0.0f};
     glm::quat m_rotation{1.0f, 0.0f, 0.0f, 0.0f};
@@ -171,8 +182,14 @@ inline void CreatureAnimator::update(float deltaTime) {
     // Update locomotion
     m_locomotion.update(deltaTime);
 
-    // Apply locomotion to pose
+    // Update activity animation driver
+    m_activityDriver.update(deltaTime);
+
+    // Apply locomotion to pose (base layer)
     m_locomotion.applyToPose(m_skeleton, m_pose, m_ikSystem);
+
+    // Blend in activity animations (overlay layer)
+    m_activityDriver.applyToPose(m_skeleton, m_pose, &m_locomotion, &m_ikSystem);
 
     // Update pose matrices
     m_pose.updateMatrices(m_skeleton);

@@ -197,6 +197,10 @@ public:
     void SetLightShaftIntensity(float intensity) { m_underwaterParams.lightShaftIntensity = intensity; }
     void SetUnderwaterQuality(int level) { m_underwaterParams.qualityLevel = glm::clamp(level, 0, 3); }
 
+    // Debug visualization
+    bool GetDebugUnderwaterVisualization() const { return m_debugShowUnderwaterDepth; }
+    void SetDebugUnderwaterVisualization(bool enable) { m_debugShowUnderwaterDepth = enable; }
+
 private:
     bool CreateShaders();
     bool CreatePipeline(Forge::RHI::Format renderTargetFormat,
@@ -248,6 +252,9 @@ private:
 
     // Underwater rendering parameters
     UnderwaterParams m_underwaterParams;
+
+    // Debug flags
+    bool m_debugShowUnderwaterDepth = false;
 
     bool m_initialized = false;
 };

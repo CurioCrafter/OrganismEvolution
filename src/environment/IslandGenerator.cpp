@@ -911,45 +911,122 @@ void IslandGenerator::generatePlateaus(std::vector<float>& heightmap, int size, 
 }
 
 void IslandGenerator::generateBeaches(std::vector<float>& heightmap, std::vector<uint8_t>& coastalMap, int size, float waterLevel) {
-    float beachLow = waterLevel * 0.95f;
-    float beachHigh = waterLevel * 1.15f;
+    // Expanded beach band with tunable width
+    // Beach extends from underwater to above water for smooth transitions
+    float beachWidth = 0.4f;  // 40% of water level by default
+    float beachLow = waterLevel * 0.85f;   // Start underwater
+    float beachHigh = waterLevel * (1.0f + beachWidth);  // End above water
 
+    const int searchRadius = 8;  // Increased from 3 for wider beach detection
+    const float maxBeachSlope = 0.08f;  // Maximum slope for sandy beaches
+
+    // First pass: Mark potential beach areas and smooth slopes
     for (int y = 0; y < size; ++y) {
         for (int x = 0; x < size; ++x) {
             float h = heightmap[y * size + x];
 
+            // Only process areas in beach height range
             if (h > beachLow && h < beachHigh) {
                 // Check if near water
                 bool nearWater = false;
-                for (int dy = -3; dy <= 3 && !nearWater; ++dy) {
-                    for (int dx = -3; dx <= 3 && !nearWater; ++dx) {
+                int waterNeighbors = 0;
+
+                for (int dy = -searchRadius; dy <= searchRadius && !nearWater; ++dy) {
+                    for (int dx = -searchRadius; dx <= searchRadius && !nearWater; ++dx) {
                         int nx = x + dx;
                         int ny = y + dy;
                         if (nx >= 0 && nx < size && ny >= 0 && ny < size) {
                             if (heightmap[ny * size + nx] < waterLevel) {
                                 nearWater = true;
+                                waterNeighbors++;
                             }
                         }
                     }
                 }
 
                 if (nearWater) {
-                    coastalMap[y * size + x] = static_cast<uint8_t>(CoastalFeature::BEACH);
-                    // Smooth beach transition
-                    float beachBlend = (h - beachLow) / (beachHigh - beachLow);
-                    heightmap[y * size + x] = beachLow + beachBlend * (beachHigh - beachLow) * 0.5f;
+                    // Calculate local slope to determine if this should be a beach
+                    float slope = 0.0f;
+                    if (x > 0 && x < size - 1 && y > 0 && y < size - 1) {
+                        float hL = heightmap[y * size + (x - 1)];
+                        float hR = heightmap[y * size + (x + 1)];
+                        float hU = heightmap[(y - 1) * size + x];
+                        float hD = heightmap[(y + 1) * size + x];
+
+                        float dx_slope = std::abs(hR - hL) * 0.5f;
+                        float dy_slope = std::abs(hD - hU) * 0.5f;
+                        slope = std::sqrt(dx_slope * dx_slope + dy_slope * dy_slope);
+                    }
+
+                    // Only create beach if slope is gentle enough
+                    if (slope < maxBeachSlope * 2.0f) {  // Allow slightly steeper initial slopes
+                        coastalMap[y * size + x] = static_cast<uint8_t>(CoastalFeature::BEACH);
+
+                        // Smooth beach transition with gentle slope
+                        float beachBlend = (h - beachLow) / (beachHigh - beachLow);
+                        beachBlend = std::max(0.0f, std::min(1.0f, beachBlend));
+
+                        // Create gradual slope from underwater to beach to land
+                        float targetHeight = beachLow + beachBlend * beachBlend * (beachHigh - beachLow);
+
+                        // Blend with existing terrain to avoid sharp changes
+                        heightmap[y * size + x] = h * 0.3f + targetHeight * 0.7f;
+                    }
                 }
             }
         }
     }
+
+    // Second pass: Enforce maximum slope constraint for gentle beaches
+    for (int pass = 0; pass < 3; ++pass) {
+        std::vector<float> smoothed = heightmap;
+
+        for (int y = 1; y < size - 1; ++y) {
+            for (int x = 1; x < size - 1; ++x) {
+                // Only process beach areas
+                if (coastalMap[y * size + x] != static_cast<uint8_t>(CoastalFeature::BEACH)) {
+                    continue;
+                }
+
+                float h = heightmap[y * size + x];
+
+                // Calculate slope to neighbors
+                float hL = heightmap[y * size + (x - 1)];
+                float hR = heightmap[y * size + (x + 1)];
+                float hU = heightmap[(y - 1) * size + x];
+                float hD = heightmap[(y + 1) * size + x];
+
+                // Find maximum height difference to neighbors
+                float maxDiff = std::max({
+                    std::abs(h - hL),
+                    std::abs(h - hR),
+                    std::abs(h - hU),
+                    std::abs(h - hD)
+                });
+
+                // If slope is too steep, smooth it out
+                if (maxDiff > maxBeachSlope) {
+                    // Average with neighbors to reduce slope
+                    float avg = (h + hL + hR + hU + hD) * 0.2f;
+                    smoothed[y * size + x] = h * 0.5f + avg * 0.5f;
+                }
+            }
+        }
+
+        heightmap = smoothed;
+    }
 }
 
 void IslandGenerator::generateCliffs(std::vector<float>& heightmap, std::vector<uint8_t>& coastalMap, int size, float waterLevel) {
+    const float cliffSlopeThreshold = 0.15f;  // Steep slopes become cliffs
+    const float rockySlopeThreshold = 0.10f;  // Moderately steep = rocky beach
+
     for (int y = 1; y < size - 1; ++y) {
         for (int x = 1; x < size - 1; ++x) {
             float h = heightmap[y * size + x];
 
-            if (h > waterLevel) {
+            // Only mark cliffs in coastal areas (near water level)
+            if (h > waterLevel * 0.8f && h < waterLevel * 1.5f) {
                 // Calculate slope
                 float hL = heightmap[y * size + (x - 1)];
                 float hR = heightmap[y * size + (x + 1)];
@@ -963,12 +1040,30 @@ void IslandGenerator::generateCliffs(std::vector<float>& heightmap, std::vector<
                     std::abs(h - hD)
                 });
 
-                // Steep slope near water = cliff
-                if (slope > 0.15f) {
-                    bool nearWater = (hL < waterLevel || hR < waterLevel || hU < waterLevel || hD < waterLevel);
-                    if (nearWater) {
+                // Check if near water
+                bool nearWater = (hL < waterLevel || hR < waterLevel ||
+                                 hU < waterLevel || hD < waterLevel);
+
+                if (nearWater) {
+                    // Classify based on slope
+                    if (slope > cliffSlopeThreshold) {
+                        // Very steep = cliff (overrides beach)
                         coastalMap[y * size + x] = static_cast<uint8_t>(CoastalFeature::CLIFF);
+                    } else if (slope > rockySlopeThreshold) {
+                        // Moderately steep = keep existing (likely beach) or mark as mangrove
+                        // Don't override if already marked as beach
+                        if (coastalMap[y * size + x] != static_cast<uint8_t>(CoastalFeature::BEACH)) {
+                            // Use noise to add variety - some rocky areas, some mangrove-suitable
+                            float nx = static_cast<float>(x) / size;
+                            float ny = static_cast<float>(y) / size;
+                            float noise = fbm(nx * 20.0f, ny * 20.0f, 3, 0.5f, 2.0f);
+
+                            if (noise > 0.3f) {
+                                coastalMap[y * size + x] = static_cast<uint8_t>(CoastalFeature::MANGROVE);
+                            }
+                        }
                     }
+                    // Gentle slopes are already handled by beach generation
                 }
             }
         }
@@ -1515,23 +1610,64 @@ void IslandGenerator::markCaveEntrances(IslandData& data) {
 void IslandGenerator::generateUnderwaterTerrain(IslandData& data) {
     generateSeafloor(data.underwaterHeightmap, data.width, data.params.underwaterDepth);
 
+    // Extended shallow water transition zone
+    float shallowWaterStart = data.params.waterLevel * 0.7f;   // Start shallow water gradient
+    float shallowWaterEnd = data.params.waterLevel;            // Water surface
+
     // Blend underwater terrain with main heightmap at coastlines
     for (int y = 0; y < data.height; ++y) {
         for (int x = 0; x < data.width; ++x) {
             float h = data.heightmap[y * data.width + x];
 
             if (h < data.params.waterLevel) {
-                // Underwater: use seafloor heightmap
+                // Underwater: blend between seafloor and beach slope
                 float underwaterH = data.underwaterHeightmap[y * data.width + x];
 
-                // Smooth transition from land slope to seafloor
-                float blendFactor = smoothstep(0.0f, data.params.waterLevel, h);
-                data.underwaterHeightmap[y * data.width + x] = lerp(underwaterH, h, blendFactor);
+                if (h > shallowWaterStart) {
+                    // Shallow water zone - create smooth transition from beach
+                    // This prevents sudden dropoffs near shoreline
+                    float shallowBlend = (h - shallowWaterStart) / (shallowWaterEnd - shallowWaterStart);
+                    shallowBlend = smoothstep(0.0f, 1.0f, shallowBlend);
+
+                    // Gradually transition from gentle beach slope to seafloor depth
+                    float targetDepth = h * 0.85f;  // Gentle slope continuation
+                    data.underwaterHeightmap[y * data.width + x] = lerp(underwaterH, targetDepth, shallowBlend);
+                } else {
+                    // Deep water - use seafloor heightmap with smooth blending
+                    float blendFactor = smoothstep(0.0f, shallowWaterStart, h);
+                    data.underwaterHeightmap[y * data.width + x] = lerp(underwaterH, h, blendFactor * 0.5f);
+                }
             } else {
                 // Above water: match terrain height
                 data.underwaterHeightmap[y * data.width + x] = h;
             }
         }
+    }
+
+    // Smooth underwater terrain near coastlines to eliminate dropoffs
+    std::vector<float> smoothed = data.underwaterHeightmap;
+    for (int pass = 0; pass < 2; ++pass) {
+        for (int y = 1; y < data.height - 1; ++y) {
+            for (int x = 1; x < data.width - 1; ++x) {
+                float h = data.heightmap[y * data.width + x];
+
+                // Only smooth shallow underwater areas (near coast)
+                if (h < data.params.waterLevel && h > shallowWaterStart) {
+                    float sum = 0.0f;
+                    int count = 0;
+
+                    for (int dy = -1; dy <= 1; ++dy) {
+                        for (int dx = -1; dx <= 1; ++dx) {
+                            sum += data.underwaterHeightmap[(y + dy) * data.width + (x + dx)];
+                            count++;
+                        }
+                    }
+
+                    smoothed[y * data.width + x] = sum / count;
+                }
+            }
+        }
+        data.underwaterHeightmap = smoothed;
     }
 
     // Add coral and kelp
@@ -1568,4 +1704,97 @@ void IslandGenerator::smoothCoastlines(IslandData& data, int iterations) {
 
         data.heightmap = smoothed;
     }
+}
+
+// ============================================================================
+// Debug and Analysis
+// ============================================================================
+
+IslandGenerator::CoastalStats IslandGenerator::analyzeCoastline(const IslandData& data) const {
+    CoastalStats stats;
+
+    float waterLevel = data.params.waterLevel;
+    float beachSlopeSum = 0.0f;
+    int beachSlopeCount = 0;
+    float cliffSlopeSum = 0.0f;
+    int cliffSlopeCount = 0;
+
+    // Analyze each coastal cell
+    for (int y = 1; y < data.height - 1; ++y) {
+        for (int x = 1; x < data.width - 1; ++x) {
+            float h = data.heightmap[y * data.width + x];
+
+            // Only analyze coastal areas (near water level)
+            if (h > waterLevel * 0.8f && h < waterLevel * 1.5f) {
+                // Check if this is actually coastal (near water)
+                bool isCoastal = false;
+                for (int dy = -2; dy <= 2 && !isCoastal; ++dy) {
+                    for (int dx = -2; dx <= 2 && !isCoastal; ++dx) {
+                        int nx = x + dx;
+                        int ny = y + dy;
+                        if (nx >= 0 && nx < data.width && ny >= 0 && ny < data.height) {
+                            if (data.heightmap[ny * data.width + nx] < waterLevel) {
+                                isCoastal = true;
+                            }
+                        }
+                    }
+                }
+
+                if (isCoastal) {
+                    stats.totalCoastalCells++;
+
+                    // Get coastal feature type
+                    CoastalFeature feature = data.getCoastalType(x, y);
+                    switch (feature) {
+                        case CoastalFeature::BEACH:
+                            stats.beachCells++;
+                            break;
+                        case CoastalFeature::CLIFF:
+                            stats.cliffCells++;
+                            break;
+                        case CoastalFeature::MANGROVE:
+                            stats.mangroveCells++;
+                            break;
+                        case CoastalFeature::REEF:
+                            stats.reefCells++;
+                            break;
+                        case CoastalFeature::FJORD:
+                            stats.fjordCells++;
+                            break;
+                    }
+
+                    // Calculate slope for this cell
+                    float hL = data.heightmap[y * data.width + (x - 1)];
+                    float hR = data.heightmap[y * data.width + (x + 1)];
+                    float hU = data.heightmap[(y - 1) * data.width + x];
+                    float hD = data.heightmap[(y + 1) * data.width + x];
+
+                    float slope = std::max({
+                        std::abs(h - hL),
+                        std::abs(h - hR),
+                        std::abs(h - hU),
+                        std::abs(h - hD)
+                    });
+
+                    if (feature == CoastalFeature::BEACH) {
+                        beachSlopeSum += slope;
+                        beachSlopeCount++;
+                    } else if (feature == CoastalFeature::CLIFF) {
+                        cliffSlopeSum += slope;
+                        cliffSlopeCount++;
+                    }
+                }
+            }
+        }
+    }
+
+    // Calculate averages
+    if (beachSlopeCount > 0) {
+        stats.avgBeachSlope = beachSlopeSum / beachSlopeCount;
+    }
+    if (cliffSlopeCount > 0) {
+        stats.avgCliffSlope = cliffSlopeSum / cliffSlopeCount;
+    }
+
+    return stats;
 }

@@ -60,6 +60,8 @@ struct IslandGenParams {
     // Water parameters
     float waterLevel = 0.35f;           // Sea level (0-1)
     float underwaterDepth = 0.2f;       // How deep underwater terrain goes
+    float beachWidth = 0.4f;            // Beach width as fraction of waterLevel (default: 40%)
+    float maxBeachSlope = 0.08f;        // Maximum beach slope before becoming cliff
 
     // Generation seed
     uint32_t seed = 12345;
@@ -145,6 +147,19 @@ public:
     void markCaveEntrances(IslandData& data);
     void generateUnderwaterTerrain(IslandData& data);
     void smoothCoastlines(IslandData& data, int iterations = 3);
+
+    // Debug and analysis
+    struct CoastalStats {
+        int totalCoastalCells = 0;
+        int beachCells = 0;
+        int cliffCells = 0;
+        int mangroveCells = 0;
+        int reefCells = 0;
+        int fjordCells = 0;
+        float avgBeachSlope = 0.0f;
+        float avgCliffSlope = 0.0f;
+    };
+    CoastalStats analyzeCoastline(const IslandData& data) const;
 
     // Utility
     static IslandShape randomShape(std::mt19937& rng);

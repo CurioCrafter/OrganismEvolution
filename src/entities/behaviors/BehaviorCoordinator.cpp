@@ -97,6 +97,56 @@ void BehaviorCoordinator::update(float deltaTime) {
 
     if (m_varietyEnabled) {
         m_varietyBehaviors.update(deltaTime, m_currentTime);
+
+        // Emit variety behavior events with cooldown
+        auto& allCreatures = m_creatureManager->getAllCreatures();
+        for (const auto& creature : allCreatures) {
+            if (!creature || !creature->isAlive()) continue;
+
+            uint32_t id = creature->getId();
+            const auto* state = m_varietyBehaviors.getBehaviorState(id);
+            if (!state) continue;
+
+            // Check cooldown
+            auto it = m_socialEventCooldowns.find(id);
+            bool canEmit = (it == m_socialEventCooldowns.end() || (m_currentTime - it->second) > EVENT_COOLDOWN);
+
+            if (canEmit) {
+                BehaviorEvent event;
+                event.creatureID = id;
+                event.position = creature->getPosition();
+                event.timestamp = m_currentTime;
+                event.intensity = 1.0f;
+
+                // Emit events for active variety behaviors
+                switch (state->currentBehavior) {
+                    case VarietyBehaviorType::MATING_DISPLAY:
+                        event.type = BehaviorEventType::MATING_DISPLAY;
+                        emitEvent(event);
+                        m_socialEventCooldowns[id] = m_currentTime;
+                        break;
+                    case VarietyBehaviorType::PLAYING:
+                        event.type = BehaviorEventType::PLAY_BEHAVIOR;
+                        emitEvent(event);
+                        m_socialEventCooldowns[id] = m_currentTime;
+                        break;
+                    case VarietyBehaviorType::SCAVENGING_SEEK:
+                    case VarietyBehaviorType::SCAVENGING_FEED:
+                        event.type = BehaviorEventType::SCAVENGING;
+                        emitEvent(event);
+                        m_socialEventCooldowns[id] = m_currentTime;
+                        break;
+                    case VarietyBehaviorType::CURIOSITY_APPROACH:
+                    case VarietyBehaviorType::CURIOSITY_INSPECT:
+                        event.type = BehaviorEventType::CURIOSITY_EXPLORE;
+                        emitEvent(event);
+                        m_socialEventCooldowns[id] = m_currentTime;
+                        break;
+                    default:
+                        break;
+                }
+            }
+        }
     }
 }
 
@@ -452,5 +502,42 @@ glm::vec3 BehaviorCoordinator::resolveConflicts(Creature* creature, const glm::v
 void BehaviorCoordinator::onCreatureDeath(uint32_t creatureId, const glm::vec3& deathPos) {
     if (m_varietyEnabled) {
         m_varietyBehaviors.onCreatureDeath(creatureId, deathPos, m_currentTime);
+    }
+}
+
+// ============================================================================
+// PHASE 10 - Agent 4: Event System Implementation
+// ============================================================================
+
+void BehaviorCoordinator::emitEvent(const BehaviorEvent& event) {
+    // Update debug statistics
+    switch (event.type) {
+        case BehaviorEventType::HUNT_START:         m_debugStats.huntStarts++; break;
+        case BehaviorEventType::HUNT_SUCCESS:       m_debugStats.huntSuccesses++; break;
+        case BehaviorEventType::HUNT_FAIL:          m_debugStats.huntFails++; break;
+        case BehaviorEventType::TERRITORIAL_DISPLAY: m_debugStats.territorialDisplays++; break;
+        case BehaviorEventType::TERRITORIAL_INTRUSION: m_debugStats.territorialIntrusions++; break;
+        case BehaviorEventType::SOCIAL_JOIN_GROUP:  m_debugStats.socialGroupJoins++; break;
+        case BehaviorEventType::SOCIAL_LEAVE_GROUP: m_debugStats.socialGroupLeaves++; break;
+        case BehaviorEventType::PARENTAL_CARE_START: m_debugStats.parentalCareStarts++; break;
+        case BehaviorEventType::PARENTAL_FEED:      m_debugStats.parentalFeeds++; break;
+        case BehaviorEventType::MIGRATION_START:    m_debugStats.migrationStarts++; break;
+        case BehaviorEventType::MIGRATION_END:      m_debugStats.migrationEnds++; break;
+        case BehaviorEventType::MATING_DISPLAY:     m_debugStats.matingDisplays++; break;
+        case BehaviorEventType::PLAY_BEHAVIOR:      m_debugStats.playBehaviors++; break;
+        case BehaviorEventType::SCAVENGING:         m_debugStats.scavengingEvents++; break;
+        case BehaviorEventType::CURIOSITY_EXPLORE:  m_debugStats.curiosityExplores++; break;
+    }
+    m_debugStats.lastEventTime = m_currentTime;
+
+    // Store in recent events history
+    m_recentEvents.push_back(event);
+    if (m_recentEvents.size() > MAX_EVENT_HISTORY) {
+        m_recentEvents.erase(m_recentEvents.begin());
+    }
+
+    // Notify all registered callbacks
+    for (auto& callback : m_eventCallbacks) {
+        callback(event);
     }
 }

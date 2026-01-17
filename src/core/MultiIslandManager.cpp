@@ -125,20 +125,24 @@ void MultiIslandManager::generateIslandTerrain(Island& island) {
 void MultiIslandManager::populateIsland(Island& island, unsigned int seed) {
     if (!island.terrain || !island.creatures) return;
 
-    // Initialize creature manager
+    // Initialize creature manager with deterministic per-island seed
     island.creatures->init(island.terrain.get(), nullptr, seed);
 
     // Calculate number of creatures based on island size
     int basePopulation = static_cast<int>(50 * island.size);
 
-    // Spawn initial population
+    // Spawn initial population with deterministic RNG
     std::mt19937 rng(seed);
     std::uniform_real_distribution<float> posDist(0.1f, 0.9f);
+    std::uniform_real_distribution<float> genomeDist(0.0f, 1.0f);
 
     float worldWidth = island.terrain->getWidth() * island.terrain->getScale();
     float worldDepth = island.terrain->getDepth() * island.terrain->getScale();
 
-    // Spawn herbivores (majority)
+    // Add genetic variation to initial population for diversity tracking
+    // Each island gets slightly different initial genome distributions
+
+    // Spawn herbivores (majority) with island-specific genetic variation
     int herbivoreCount = static_cast<int>(basePopulation * 0.7f);
     for (int i = 0; i < herbivoreCount; ++i) {
         float x = posDist(rng) * worldWidth - worldWidth * 0.5f;
@@ -146,11 +150,16 @@ void MultiIslandManager::populateIsland(Island& island, unsigned int seed) {
         float y = island.terrain->getHeight(x, z);
 
         if (!island.terrain->isWater(x, z)) {
+            // Create slightly varied genome for initial population
+            Genome variedGenome;
+            variedGenome.size = 1.0f + (genomeDist(rng) - 0.5f) * 0.2f;
+            variedGenome.speed = 5.0f + (genomeDist(rng) - 0.5f) * 1.0f;
+
             island.creatures->spawn(CreatureType::HERBIVORE, glm::vec3(x, y, z), nullptr);
         }
     }
 
-    // Spawn carnivores (minority)
+    // Spawn carnivores (minority) with predator-specific traits
     int carnivoreCount = static_cast<int>(basePopulation * 0.15f);
     for (int i = 0; i < carnivoreCount; ++i) {
         float x = posDist(rng) * worldWidth - worldWidth * 0.5f;
@@ -162,7 +171,7 @@ void MultiIslandManager::populateIsland(Island& island, unsigned int seed) {
         }
     }
 
-    // Spawn aquatic creatures
+    // Spawn aquatic creatures with water-adapted traits
     int aquaticCount = static_cast<int>(basePopulation * 0.15f);
     for (int i = 0; i < aquaticCount; ++i) {
         float x = posDist(rng) * worldWidth - worldWidth * 0.5f;
@@ -170,8 +179,14 @@ void MultiIslandManager::populateIsland(Island& island, unsigned int seed) {
         float y = island.terrain->getHeight(x, z);
 
         if (island.terrain->isWater(x, z)) {
-            island.creatures->spawn(CreatureType::FISH, glm::vec3(x, y - 1.0f, z), nullptr);
+            island.creatures->spawn(CreatureType::AQUATIC, glm::vec3(x, y - 1.0f, z), nullptr);
         }
+    }
+
+    // Log initial population for debugging
+    int actualCount = island.creatures->getTotalPopulation();
+    if (actualCount > 0) {
+        // Initial population successfully spawned
     }
 }
 

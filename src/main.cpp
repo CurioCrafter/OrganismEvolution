@@ -40,6 +40,10 @@
 #include <cmath>
 #include <unordered_map>
 #include <algorithm>
+#include <future>
+#include <mutex>
+#include <fstream>
+#include <filesystem>
 
 // ForgeEngine
 #include "Platform/Window.h"
@@ -63,6 +67,7 @@
 // Entities and simulation (headers only for now - full integration later)
 #include "entities/CreatureType.h"
 #include "entities/Genome.h"
+#include "entities/Creature.h"
 
 // Procedural creature mesh cache
 #include "graphics/rendering/CreatureMeshCache.h"
@@ -72,12 +77,24 @@
 
 // Save/Load System (Phase 4 bug fix - integration)
 #include "core/SaveManager.h"
+// Creature Manager (Phase 10)
+#include "core/CreatureManager.h"
 // Day/Night Cycle
 #include "core/DayNightCycle.h"
 
 // Gameplay Systems (Agent 26 - Fun Factor)
 #include "core/GameplayManager.h"
 #include "ui/GameplayUI.h"
+#include "core/SimulationOrchestrator.h"
+
+// Phase 10 Observer UI (Agent 8)
+#include "ui/SelectionSystem.h"
+#include "ui/CreatureInspectionPanel.h"
+#include "ui/MainMenu.h"
+#include "ui/GodModeUI.h"
+
+// Behavior systems
+#include "entities/behaviors/BehaviorCoordinator.h"
 
 // Water Rendering System (Phase 5 - 3D World)
 #include "graphics/WaterRenderer.h"
@@ -91,9 +108,18 @@
 #include "graphics/rendering/TreeRenderer_DX12.h"
 #include "environment/VegetationManager.h"
 #include "environment/Terrain.h"
+#include "environment/ProceduralWorld.h"
+
+// Climate/Weather
+#include "environment/ClimateSystem.h"
+#include "environment/SeasonManager.h"
+#include "environment/WeatherSystem.h"
 
 // Terrain Rendering System (Phase 5 - 3D World)
 #include "graphics/rendering/TerrainRenderer_DX12.h"
+
+// Camera (for selection system)
+#include "graphics/Camera.h"
 
 using Microsoft::WRL::ComPtr;
 using namespace DirectX;
@@ -1810,7 +1836,7 @@ private:
 // ============================================================================
 // Camera Transition System (Phase 5 - Smooth Camera)
 // ============================================================================
-struct CameraTransition {
+struct MainCameraTransition {
     glm::vec3 startTarget;
     glm::vec3 endTarget;
     float startYaw, endYaw;
@@ -1820,7 +1846,7 @@ struct CameraTransition {
     float progress;
     bool active;
 
-    CameraTransition() : duration(0), progress(0), active(false) {}
+    MainCameraTransition() : duration(0), progress(0), active(false) {}
 
     void start(const glm::vec3& target, float yaw, float pitch, float distance, float dur) {
         // Save current state (will be set from AppState before calling)
@@ -1880,6 +1906,17 @@ struct CameraTransition {
 };
 
 // Forward declaration of StartCameraTransition helper (defined after g_app)
+static float GetCreatureRenderSurfaceHeight(const Creature& creature);
+static void ResetUnifiedFoodSources(u32 plantCount);
+static void SpawnInitialCreatures(const ui::EvolutionStartPreset& evolutionPreset);
+static void UpdateUnifiedSimulation(float dt);
+static void StepUnifiedSimulation(int count);
+static void StartWorldGeneration(const ui::WorldGenConfig& menuConfig,
+                                 const ui::EvolutionStartPreset& evolutionPreset,
+                                 bool godModeEnabled);
+static void ApplyGeneratedWorldData(const WorldGenConfig& proceduralConfig,
+                                    const ui::EvolutionStartPreset& evolutionPreset,
+                                    bool godModeEnabled);
 
 // ========================================================================
 // Procedural Creature Mesh (DX12 buffers)
@@ -1936,6 +1973,18 @@ struct AppState {
     SimulationWorld world;
     DayNightCycle dayNight;
 
+    // PHASE 10 - Agent 1: Unified creature management system
+    std::unique_ptr<Forge::CreatureManager> creatureManager;
+    BehaviorCoordinator behaviorCoordinator;
+    SeasonManager seasonManager;
+    ClimateSystem climateSystem;
+    WeatherSystem weatherSystem;
+    Forge::SimulationOrchestrator simulationOrchestrator;
+    ui::GodModeUI godModeUI;
+    bool useUnifiedSimulation = false;
+    const Creature* followCreature = nullptr;
+    std::mt19937 unifiedRng;
+
     // ImGui
     ComPtr<ID3D12DescriptorHeap> imguiSrvHeap;
     bool imguiInitialized = false;
@@ -1955,11 +2004,13 @@ struct AppState {
     float cameraPitch = 30.0f;
     float cameraDistance = 200.0f;
     bool mouseCaptured = false;
+    Camera camera;  // Phase 10: Camera object for selection system
 
     // Camera settings (configurable)
     bool invertMouseX = false;  // Horizontal mouse inversion
     bool invertMouseY = false;  // Vertical mouse inversion
     float mouseSensitivity = 0.15f;  // Mouse look sensitivity
+    float cameraMoveSpeed = 120.0f;  // WASD movement speed (units/sec)
     float zoomSpeed = 15.0f;  // Zoom speed
     float minZoom = 10.0f;  // Minimum camera distance
     float maxZoom = 500.0f;  // Maximum camera distance
@@ -2015,7 +2066,7 @@ struct AppState {
     ui::GameplayUI gameplayUI;
 
     // Camera Transitions (Phase 5 - Smooth camera)
-    CameraTransition cameraTransition;
+    MainCameraTransition cameraTransition;
 
     // Help Overlay (Phase 5 - UX)
     bool showHelpOverlay = false;
@@ -2026,6 +2077,27 @@ struct AppState {
     bool isLoading = false;
     float loadingProgress = 0.0f;
     std::string loadingStatus;
+    bool worldGenInProgress = false;
+    std::future<void> worldGenFuture;
+    WorldGenConfig pendingProceduralConfig;
+    ui::EvolutionStartPreset pendingEvolutionPreset;
+    bool pendingGodMode = false;
+    float loadingPulseTime = 0.0f;
+    float worldGenElapsed = 0.0f;
+    float worldGenProgress = 0.0f;
+    std::string worldGenStage;
+    std::mutex worldGenMutex;
+    std::mutex worldGenLogMutex;
+    bool worldDiagnostics = false;
+    int worldDiagnosticsFrames = 0;
+
+    // Phase 10 Observer UI (Agent 8 - Creature Inspection)
+    ui::SelectionSystem selectionSystem;
+    ui::CreatureInspectionPanel inspectionPanel;
+    ui::MainMenu mainMenu;
+    std::unique_ptr<ProceduralWorld> proceduralWorld;
+    bool hasGeneratedWorld = false;
+    bool godModeEnabled = false;
 
     // ========================================================================
     // Creature 3D Rendering Pipeline
@@ -2122,6 +2194,608 @@ void StartCameraTransition(const glm::vec3& pos, const glm::vec3& target, float 
     g_app.cameraTransition.startDistance = g_app.cameraDistance;
 
     g_app.cameraTransition.startWithPosition(pos, target, duration);
+}
+
+static void ApplySettingsConfig(const ui::SettingsConfig& settings) {
+    g_app.world.timeScale = settings.defaultSimSpeed;
+    g_app.world.paused = settings.pauseOnStart;
+    g_app.showNametags = settings.showNametags;
+    g_app.nametagMaxDistance = settings.nametagDistance;
+    g_app.invertMouseY = settings.invertY;
+    g_app.mouseSensitivity = settings.cameraSensitivity * 0.15f;
+    g_app.zoomSpeed = std::max(1.0f, settings.cameraSpeed * 0.15f);
+
+    if (g_app.window) {
+        g_app.window->SetVSync(settings.enableVSync);
+    }
+
+    if (settings.autoSave) {
+        g_app.saveManager.enableAutoSave(static_cast<float>(settings.autoSaveInterval));
+    } else {
+        g_app.saveManager.disableAutoSave();
+    }
+}
+
+static std::string GetLogTimestamp() {
+    auto now = std::chrono::system_clock::now();
+    std::time_t nowTime = std::chrono::system_clock::to_time_t(now);
+    std::tm localTime{};
+#ifdef _WIN32
+    localtime_s(&localTime, &nowTime);
+#else
+    localtime_r(&nowTime, &localTime);
+#endif
+    char buffer[64];
+    std::strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S", &localTime);
+    return std::string(buffer);
+}
+
+static void AppendWorldGenMainLog(const std::string& message) {
+    std::lock_guard<std::mutex> lock(g_app.worldGenLogMutex);
+    std::filesystem::create_directories("logs");
+    std::ofstream logFile("logs/worldgen_main.log", std::ios::app);
+    if (!logFile) {
+        return;
+    }
+    logFile << "[" << GetLogTimestamp() << "] " << message << "\n";
+}
+
+static void AppendRuntimeDiagLog(const std::string& message) {
+    std::lock_guard<std::mutex> lock(g_app.worldGenLogMutex);
+    std::filesystem::create_directories("logs");
+    std::ofstream logFile("logs/runtime_diag.log", std::ios::app);
+    if (!logFile) {
+        return;
+    }
+    logFile << "[" << GetLogTimestamp() << "] " << message << "\n";
+}
+
+static void LogWorldDiag(const std::string& message) {
+    if (!g_app.worldDiagnostics || g_app.worldDiagnosticsFrames <= 0) {
+        return;
+    }
+    AppendRuntimeDiagLog(message);
+}
+
+static void SetLoadingStatus(const std::string& status, float progress) {
+    g_app.loadingStatus = status;
+    g_app.loadingProgress = std::max(g_app.loadingProgress, progress);
+}
+
+static void StartWorldGeneration(const ui::WorldGenConfig& menuConfig,
+                                 const ui::EvolutionStartPreset& evolutionPreset,
+                                 bool godModeEnabled) {
+    if (g_app.worldGenInProgress) {
+        return;
+    }
+
+    if (!g_app.proceduralWorld) {
+        g_app.proceduralWorld = std::make_unique<ProceduralWorld>();
+    }
+
+    g_app.pendingProceduralConfig = ui::translateToProceduralWorldConfig(menuConfig);
+    g_app.pendingEvolutionPreset = evolutionPreset;
+    g_app.pendingGodMode = godModeEnabled;
+    g_app.loadingPulseTime = 0.0f;
+    g_app.worldGenElapsed = 0.0f;
+    g_app.isLoading = true;
+    g_app.loadingProgress = 0.0f;
+    SetLoadingStatus("Preparing world generation...", 0.05f);
+    {
+        std::lock_guard<std::mutex> lock(g_app.worldGenMutex);
+        g_app.worldGenProgress = 0.05f;
+        g_app.worldGenStage = "Preparing world generation...";
+    }
+    g_app.worldGenInProgress = true;
+    g_app.hasGeneratedWorld = false;
+    ProceduralWorld* proceduralWorld = g_app.proceduralWorld.get();
+    WorldGenConfig configCopy = g_app.pendingProceduralConfig;
+    AppendWorldGenMainLog("World generation started.");
+    AppendWorldGenMainLog(
+        "Config: seed=" + std::to_string(configCopy.seed) +
+        " resolution=" + std::to_string(configCopy.heightmapResolution) +
+        " islands=" + std::to_string(configCopy.desiredRegionCount) +
+        " ocean=" + std::to_string(configCopy.oceanCoverage) +
+        " terrainScale=" + std::to_string(configCopy.terrainScale)
+    );
+
+    AppState* app = &g_app;
+    proceduralWorld->setProgressCallback([app](float progress, const char* stage) {
+        std::lock_guard<std::mutex> lock(app->worldGenMutex);
+        app->worldGenProgress = std::max(app->worldGenProgress, progress);
+        app->worldGenStage = stage ? stage : "";
+    });
+
+    g_app.worldGenFuture = std::async(std::launch::async, [proceduralWorld, configCopy]() {
+        proceduralWorld->generate(configCopy);
+    });
+}
+
+static void ApplyGeneratedWorldData(const WorldGenConfig& proceduralConfig,
+                                    const ui::EvolutionStartPreset& evolutionPreset,
+                                    bool godModeEnabled) {
+    if (g_app.device) {
+        g_app.device->WaitIdle();
+        AppendWorldGenMainLog("GPU idle before world setup.");
+    }
+
+    const GeneratedWorld* world = g_app.proceduralWorld
+        ? g_app.proceduralWorld->getCurrentWorld()
+        : nullptr;
+    if (!world) {
+        g_app.isLoading = false;
+        g_app.worldGenInProgress = false;
+        g_app.mainMenu.setActive(true);
+        g_app.statusMessage = "World generation failed";
+        g_app.statusMessageTimer = 4.0f;
+        AppendWorldGenMainLog("World generation failed: null world.");
+        return;
+    }
+
+    if (!world->biomeSystem || !world->planetTheme) {
+        g_app.isLoading = false;
+        g_app.worldGenInProgress = false;
+        g_app.mainMenu.setActive(true);
+        g_app.statusMessage = "World generation incomplete";
+        g_app.statusMessageTimer = 4.0f;
+        AppendWorldGenMainLog("World generation failed: missing biome system or planet theme.");
+        return;
+    }
+    if (world->islandData.width <= 0 || world->islandData.height <= 0 ||
+        world->islandData.heightmap.empty()) {
+        g_app.isLoading = false;
+        g_app.worldGenInProgress = false;
+        g_app.mainMenu.setActive(true);
+        g_app.statusMessage = "World generation invalid terrain data";
+        g_app.statusMessageTimer = 4.0f;
+        AppendWorldGenMainLog("World generation failed: invalid terrain data.");
+        return;
+    }
+
+    SetLoadingStatus("Finalizing world...", 0.9f);
+    AppendWorldGenMainLog("Finalizing generated world.");
+
+    const float worldSize = proceduralConfig.terrainScale;
+    const float heightScale = 30.0f;
+    const float waterLevel = world->islandData.params.waterLevel;
+    const float beachLevel = std::min(0.95f, std::max(waterLevel + 0.02f, waterLevel + 0.07f));
+
+    SetLoadingStatus("Initializing terrain sampler...", 0.91f);
+    AppendWorldGenMainLog("Initializing terrain sampler.");
+    TerrainSampler::SetWorldParams(worldSize, heightScale, waterLevel, beachLevel);
+    TerrainSampler::SetHeightmap(&world->islandData.heightmap,
+                                 world->islandData.width,
+                                 world->islandData.height);
+
+    SetLoadingStatus("Building terrain...", 0.92f);
+    AppendWorldGenMainLog("Building terrain instance.");
+    const float terrainScale = worldSize / static_cast<float>(std::max(1, world->islandData.width));
+    g_app.terrain = std::make_unique<Terrain>(world->islandData.width, world->islandData.height, terrainScale);
+    g_app.terrain->generate(world->planetSeed.terrainSeed);
+    AppendWorldGenMainLog("Terrain instance ready.");
+
+    g_app.world.terrainSeed = world->planetSeed.terrainSeed;
+    g_app.world.SetWorldBounds(worldSize * 0.5f);
+    g_app.creatureManager = std::make_unique<Forge::CreatureManager>(worldSize, worldSize);
+    g_app.creatureManager->init(g_app.terrain.get(), nullptr, world->planetSeed.terrainSeed);
+    g_app.behaviorCoordinator.init(g_app.creatureManager.get(),
+                                   g_app.creatureManager->getGlobalGrid(),
+                                   nullptr,
+                                   &g_app.seasonManager,
+                                   world->biomeSystem.get(),
+                                   g_app.terrain.get());
+    g_app.behaviorCoordinator.reset();
+    AppendWorldGenMainLog("Creature manager initialized.");
+
+    SetLoadingStatus("Generating vegetation...", 0.94f);
+    AppendWorldGenMainLog("Generating vegetation.");
+    g_app.vegetationManager = std::make_unique<VegetationManager>(g_app.terrain.get());
+    g_app.vegetationManager->generate(world->planetSeed.vegetationSeed);
+    g_app.vegetationManager->initializeAquaticPlants(nullptr, world->planetSeed.vegetationSeed);
+    AppendWorldGenMainLog("Vegetation generated.");
+
+    SetLoadingStatus("Generating grass...", 0.95f);
+    AppendWorldGenMainLog("Generating grass.");
+    g_app.grassSystem = std::make_unique<GrassSystem>();
+    g_app.grassSystem->initialize(nullptr, g_app.terrain.get());
+    g_app.grassSystem->generate(world->planetSeed.vegetationSeed);
+    AppendWorldGenMainLog("Grass generated.");
+
+    if (g_app.grassPipeline) {
+        AppendWorldGenMainLog("Initializing grass renderer.");
+        g_app.grassRenderer = std::make_unique<GrassRendererDX12>();
+        g_app.grassRenderingEnabled = g_app.grassRenderer->init(g_app.device.get(), g_app.grassSystem.get());
+        AppendWorldGenMainLog(std::string("Grass renderer init: ") +
+                              (g_app.grassRenderingEnabled ? "ok" : "failed"));
+    }
+
+    if (g_app.treePipeline) {
+        SetLoadingStatus("Generating trees...", 0.96f);
+        AppendWorldGenMainLog("Initializing tree renderer.");
+        g_app.treeRenderer = std::make_unique<TreeRendererDX12>();
+        if (g_app.treeRenderer->init(g_app.device.get(), g_app.vegetationManager.get())) {
+            AppendWorldGenMainLog("Generating tree meshes...");
+            g_app.treeRenderer->generateTreeMeshes();
+            g_app.treeRenderingEnabled = true;
+            AppendWorldGenMainLog("Tree meshes generated.");
+        } else {
+            g_app.treeRenderingEnabled = false;
+            AppendWorldGenMainLog("Tree renderer init failed.");
+        }
+    }
+
+    if (g_app.terrainPipeline) {
+        SetLoadingStatus("Preparing terrain renderer...", 0.97f);
+        AppendWorldGenMainLog("Initializing terrain renderer.");
+        g_app.terrainRenderer = std::make_unique<TerrainRendererDX12>();
+        g_app.terrainRenderingEnabled = g_app.terrainRenderer->init(g_app.device.get());
+        AppendWorldGenMainLog(std::string("Terrain renderer init: ") +
+                              (g_app.terrainRenderingEnabled ? "ok" : "failed"));
+    }
+
+    SetLoadingStatus("Preparing water...", 0.975f);
+    g_app.waterLevel = TerrainSampler::GetWaterHeight();
+    if (g_app.waterRenderer.IsInitialized()) {
+        g_app.waterRenderer.GenerateMesh(64, worldSize, g_app.waterLevel);
+
+        if (world->planetTheme) {
+            const auto& terrainPalette = world->planetTheme->getTerrain();
+            g_app.waterRenderer.SetWaterColor(
+                glm::vec4(terrainPalette.deepWaterColor, 1.0f),
+                glm::vec4(terrainPalette.shallowWaterColor, 1.0f)
+            );
+            auto atmosphere = world->planetTheme->getCurrentAtmosphere();
+            g_app.waterRenderer.SetSkyColors(atmosphere.skyZenithColor, atmosphere.skyHorizonColor);
+        }
+    }
+
+    g_app.inspectionPanel.setBiomeSystem(world->biomeSystem.get());
+
+    ApplySettingsConfig(g_app.mainMenu.getSettings());
+
+    SetLoadingStatus("Initializing climate systems...", 0.98f);
+    g_app.useUnifiedSimulation = true;
+    g_app.unifiedRng.seed(world->planetSeed.terrainSeed);
+
+    g_app.seasonManager = SeasonManager();
+    g_app.climateSystem = ClimateSystem();
+    g_app.weatherSystem = WeatherSystem();
+    g_app.climateSystem.initialize(g_app.terrain.get(), &g_app.seasonManager);
+    g_app.weatherSystem.initialize(&g_app.seasonManager, &g_app.climateSystem);
+
+    if (g_app.vegetationManager) {
+        g_app.vegetationManager->setClimateSystem(&g_app.climateSystem);
+    }
+    if (g_app.grassSystem) {
+        g_app.grassSystem->setClimateSystem(&g_app.climateSystem);
+    }
+
+    SetLoadingStatus("Spawning life...", 0.99f);
+    g_app.world.simulationTime = 0.0f;
+    g_app.world.maxGeneration = 1;
+    g_app.world.totalBirths = 0;
+    g_app.world.totalDeaths = 0;
+    g_app.world.creaturePool.clear();
+    g_app.world.activeCreatures.clear();
+    g_app.world.creatures.clear();
+    g_app.world.UpdateStats();
+
+    ResetUnifiedFoodSources(static_cast<u32>(std::max(0, evolutionPreset.plantCount)));
+    SpawnInitialCreatures(evolutionPreset);
+
+    g_app.simulationOrchestrator.bindTimeState(&g_app.world.paused,
+                                               &g_app.world.timeScale,
+                                               &g_app.world.simulationTime);
+    g_app.simulationOrchestrator.setCreatureManager(g_app.creatureManager.get());
+    g_app.simulationOrchestrator.setTerrain(g_app.terrain.get());
+    g_app.simulationOrchestrator.setWeather(&g_app.weatherSystem);
+    g_app.simulationOrchestrator.setStepFramesCallback([](int count) {
+        StepUnifiedSimulation(count);
+    });
+
+    g_app.godModeEnabled = godModeEnabled;
+    g_app.godModeUI.init(&g_app.simulationOrchestrator);
+    g_app.godModeUI.setEnabled(g_app.godModeEnabled);
+    g_app.followCreature = nullptr;
+    g_app.followCreatureId = -1;
+    g_app.cameraFollowMode = AppState::CameraFollowMode::NONE;
+    g_app.hasGeneratedWorld = true;
+    g_app.mainMenu.setCanContinue(true);
+
+    SetLoadingStatus("World ready", 1.0f);
+    g_app.isLoading = false;
+    g_app.worldGenInProgress = false;
+    g_app.mainMenu.setActive(false);
+    AppendWorldGenMainLog("World generation completed.");
+    g_app.worldDiagnostics = true;
+    g_app.worldDiagnosticsFrames = 3;
+    AppendRuntimeDiagLog("Diagnostics armed: next 3 frames.");
+}
+
+static float GetCreatureRenderSurfaceHeight(const Creature& creature) {
+    float surfaceHeight = creature.getPosition().y;
+    if (!isFlying(creature.getType()) && !isAquatic(creature.getType())) {
+        surfaceHeight -= creature.getGenome().size;
+    }
+    return surfaceHeight;
+}
+
+static void ResetUnifiedFoodSources(u32 plantCount) {
+    g_app.world.foods.clear();
+    if (plantCount == 0) {
+        return;
+    }
+
+    float spawnRadius = g_app.world.GetWorldBounds() * 0.95f;
+    g_app.world.SpawnFood(plantCount, spawnRadius, 40.0f, 60.0f);
+}
+
+static void SpawnInitialCreatures(const ui::EvolutionStartPreset& evolutionPreset) {
+    if (!g_app.creatureManager) {
+        return;
+    }
+
+    float spawnRadius = g_app.world.GetWorldBounds() * 0.9f;
+    std::uniform_real_distribution<float> posDist(-spawnRadius, spawnRadius);
+
+    const std::array<CreatureType, 3> flyingTypes = {
+        CreatureType::FLYING_BIRD,
+        CreatureType::FLYING_INSECT,
+        CreatureType::AERIAL_PREDATOR
+    };
+    const std::array<CreatureType, 3> herbivoreTypes = {
+        CreatureType::GRAZER,
+        CreatureType::BROWSER,
+        CreatureType::FRUGIVORE
+    };
+    const std::array<CreatureType, 3> carnivoreTypes = {
+        CreatureType::SMALL_PREDATOR,
+        CreatureType::OMNIVORE,
+        CreatureType::APEX_PREDATOR
+    };
+    const std::array<CreatureType, 3> aquaticTypes = {
+        CreatureType::AQUATIC_HERBIVORE,
+        CreatureType::AQUATIC_PREDATOR,
+        CreatureType::AQUATIC_APEX
+    };
+    std::uniform_int_distribution<size_t> flyingTypeDist(0, flyingTypes.size() - 1);
+    std::uniform_int_distribution<size_t> herbivoreTypeDist(0, herbivoreTypes.size() - 1);
+    std::uniform_int_distribution<size_t> carnivoreTypeDist(0, carnivoreTypes.size() - 1);
+    std::uniform_int_distribution<size_t> aquaticTypeDist(0, aquaticTypes.size() - 1);
+
+    auto spawnBatch = [&](CreatureType type, int count) {
+        for (int i = 0; i < count; ++i) {
+            glm::vec3 pos(posDist(g_app.unifiedRng), 0.0f, posDist(g_app.unifiedRng));
+            Forge::CreatureHandle handle = g_app.creatureManager->spawn(type, pos, nullptr);
+            if (Creature* creature = g_app.creatureManager->get(handle)) {
+                creature->setGeneration(1);
+            }
+        }
+    };
+
+    for (int i = 0; i < std::max(0, evolutionPreset.herbivoreCount); ++i) {
+        CreatureType type = herbivoreTypes[herbivoreTypeDist(g_app.unifiedRng)];
+        spawnBatch(type, 1);
+    }
+
+    for (int i = 0; i < std::max(0, evolutionPreset.carnivoreCount); ++i) {
+        CreatureType type = carnivoreTypes[carnivoreTypeDist(g_app.unifiedRng)];
+        spawnBatch(type, 1);
+    }
+
+    for (int i = 0; i < evolutionPreset.flyingCount; ++i) {
+        CreatureType type = flyingTypes[flyingTypeDist(g_app.unifiedRng)];
+        spawnBatch(type, 1);
+    }
+
+    for (int i = 0; i < evolutionPreset.aquaticCount; ++i) {
+        CreatureType type = aquaticTypes[aquaticTypeDist(g_app.unifiedRng)];
+        spawnBatch(type, 1);
+    }
+}
+
+static void UpdateUnifiedSimulation(float dt) {
+    if (!g_app.creatureManager || !g_app.terrain) {
+        return;
+    }
+
+    if (g_app.world.paused) {
+        return;
+    }
+
+    LogWorldDiag("Unified step: start");
+
+    float scaledDt = dt * g_app.world.timeScale;
+    g_app.world.simulationTime += scaledDt;
+
+    g_app.seasonManager.update(scaledDt);
+    g_app.climateSystem.update(scaledDt);
+    g_app.weatherSystem.update(scaledDt);
+    LogWorldDiag("Unified step: climate/weather updated");
+
+    EnvironmentConditions env;
+    const WeatherState weather = g_app.weatherSystem.getInterpolatedWeather();
+    env.visibility = std::clamp(1.0f - weather.fogDensity, 0.1f, 1.0f);
+    env.ambientLight = std::clamp(weather.sunIntensity, 0.1f, 1.0f);
+    glm::vec3 windDir(weather.windDirection.x, 0.0f, weather.windDirection.y);
+    if (glm::length(windDir) > 0.001f) {
+        env.windDirection = glm::normalize(windDir);
+    }
+    env.windSpeed = weather.windStrength * 10.0f;
+    env.temperature = g_app.climateSystem.getGlobalTemperature() + weather.temperatureModifier;
+
+    std::vector<glm::vec3> foodPositions;
+    foodPositions.reserve(g_app.world.foods.size());
+    for (const auto& food : g_app.world.foods) {
+        if (food->amount > 0.0f) {
+            foodPositions.push_back(food->position);
+        }
+    }
+    if (g_app.worldDiagnostics && g_app.worldDiagnosticsFrames > 0) {
+        LogWorldDiag("Unified step: food positions=" + std::to_string(foodPositions.size()));
+    }
+
+    std::vector<Creature*> creatures;
+    creatures.reserve(g_app.creatureManager->getAllCreatures().size());
+    g_app.creatureManager->forEach([&](Creature& creature, size_t) {
+        creatures.push_back(&creature);
+    });
+    if (g_app.worldDiagnostics && g_app.worldDiagnosticsFrames > 0) {
+        LogWorldDiag("Unified step: creatures=" + std::to_string(creatures.size()));
+    }
+
+    g_app.creatureManager->rebuildSpatialGrids();
+    g_app.behaviorCoordinator.update(scaledDt);
+    LogWorldDiag("Unified step: spatial grids rebuilt + behavior updated");
+
+    struct ReproCandidate {
+        CreatureType type;
+        glm::vec3 position;
+        Genome genome;
+        int generation = 0;
+    };
+    std::vector<ReproCandidate> reproQueue;
+    reproQueue.reserve(64);
+
+    std::uniform_real_distribution<float> reproChance(0.0f, 1.0f);
+    const float reproRate = 0.015f;
+
+    int debugLogged = 0;
+    for (Creature* creature : creatures) {
+        if (!creature || !creature->isAlive()) {
+            continue;
+        }
+
+        if (debugLogged < 3) {
+            LogWorldDiag("Unified creature update begin id=" + std::to_string(creature->getID()));
+        }
+        creature->update(
+            scaledDt,
+            *g_app.terrain,
+            foodPositions,
+            creatures,
+            g_app.creatureManager->getGlobalGrid(),
+            &env,
+            nullptr,
+            &g_app.behaviorCoordinator
+        );
+        if (debugLogged < 3) {
+            LogWorldDiag("Unified creature update end id=" + std::to_string(creature->getID()));
+        }
+
+        ClimateData climate = g_app.climateSystem.getClimateAt(creature->getPosition());
+        if (debugLogged < 3) {
+            LogWorldDiag("Unified climate response begin id=" + std::to_string(creature->getID()));
+        }
+        creature->updateClimateResponse(climate, &g_app.climateSystem, scaledDt);
+        if (debugLogged < 3) {
+            LogWorldDiag("Unified climate response end id=" + std::to_string(creature->getID()));
+        }
+
+        if (creature->canReproduce() && reproChance(g_app.unifiedRng) < reproRate * scaledDt) {
+            float energyCost = 0.0f;
+            creature->reproduce(energyCost);
+            reproQueue.push_back({
+                creature->getType(),
+                creature->getPosition(),
+                creature->getGenome(),
+                creature->getGeneration()
+            });
+        }
+
+        if (debugLogged < 3) {
+            debugLogged++;
+        }
+    }
+    LogWorldDiag("Unified step: creature updates done");
+
+    constexpr float FOOD_EAT_RANGE_SQ = 4.0f;
+    for (Creature* creature : creatures) {
+        if (!creature || !creature->isAlive()) {
+            continue;
+        }
+
+        if (!isHerbivore(creature->getType()) && creature->getType() != CreatureType::FLYING) {
+            continue;
+        }
+
+        for (auto& food : g_app.world.foods) {
+            if (food->amount <= 0.0f) {
+                continue;
+            }
+
+            float dx = food->position.x - creature->getPosition().x;
+            float dz = food->position.z - creature->getPosition().z;
+            float distSq = dx * dx + dz * dz;
+
+            if (distSq < FOOD_EAT_RANGE_SQ) {
+                float eatAmount = std::min(food->amount, 10.0f * scaledDt);
+                creature->consumeFood(eatAmount);
+                food->amount -= eatAmount;
+                break;
+            }
+        }
+    }
+    LogWorldDiag("Unified step: food consumption done");
+
+    g_app.world.foods.erase(
+        std::remove_if(g_app.world.foods.begin(), g_app.world.foods.end(),
+                       [](const std::unique_ptr<Food>& food) { return food->amount <= 0.0f; }),
+        g_app.world.foods.end()
+    );
+    LogWorldDiag("Unified step: food cleanup done");
+
+    if (!reproQueue.empty()) {
+        for (const auto& entry : reproQueue) {
+            Forge::CreatureHandle handle = g_app.creatureManager->spawn(
+                entry.type,
+                entry.position,
+                &entry.genome
+            );
+            if (Creature* child = g_app.creatureManager->get(handle)) {
+                child->setGeneration(entry.generation + 1);
+            }
+        }
+    }
+    LogWorldDiag("Unified step: reproduction done");
+
+    std::uniform_real_distribution<float> spawnChance(0.0f, 1.0f);
+    float spawnBound = std::max(1.0f, g_app.world.GetWorldBounds());
+    std::uniform_real_distribution<float> posDist(-spawnBound, spawnBound);
+
+    if (spawnChance(g_app.world.respawnRng) < 0.1f * scaledDt &&
+        g_app.world.foods.size() < MAX_FOOD_SOURCES) {
+        for (int attempt = 0; attempt < 5; ++attempt) {
+            float x = posDist(g_app.world.respawnRng);
+            float z = posDist(g_app.world.respawnRng);
+            if (TerrainSampler::IsWater(x, z)) {
+                continue;
+            }
+            float y = TerrainSampler::SampleHeight(x, z);
+            g_app.world.foods.push_back(std::make_unique<Food>(glm::vec3(x, y, z), 50.0f));
+            break;
+        }
+    }
+    LogWorldDiag("Unified step: food respawn done");
+
+    int maxCreatures = std::max(10, g_app.mainMenu.getSettings().maxCreatures);
+    g_app.creatureManager->cullToLimit(static_cast<size_t>(maxCreatures));
+    LogWorldDiag("Unified step: cull done");
+
+    g_app.creatureManager->updateAmphibiousTransitions(scaledDt, TerrainSampler::GetWaterHeight());
+    g_app.creatureManager->update(scaledDt);
+    LogWorldDiag("Unified step: amphibious + manager update done");
+}
+
+static void StepUnifiedSimulation(int count) {
+    if (count <= 0) {
+        return;
+    }
+
+    const float stepDt = 1.0f / 60.0f;
+    for (int i = 0; i < count; ++i) {
+        UpdateUnifiedSimulation(stepDt);
+    }
 }
 
 // Helper to get creature position by index from creature pool
@@ -2875,7 +3549,11 @@ void RenderCreatures(const glm::mat4& viewProj,
     };
 
     std::vector<CreatureDrawItem> drawItems;
-    drawItems.reserve(std::min(g_app.world.GetAliveCount(), AppState::MAX_CB_CREATURES));
+    const bool useUnified = g_app.useUnifiedSimulation && g_app.creatureManager;
+    size_t estimatedCount = useUnified
+        ? static_cast<size_t>(g_app.creatureManager->getTotalPopulation())
+        : static_cast<size_t>(g_app.world.GetAliveCount());
+    drawItems.reserve(std::min(estimatedCount, static_cast<size_t>(AppState::MAX_CB_CREATURES)));
 
     void* creatureCbData = g_app.creatureConstantBuffer->Map();
     if (!creatureCbData) {
@@ -3005,8 +3683,135 @@ void RenderCreatures(const glm::mat4& viewProj,
         creatureIndex++;
     };
 
+    auto addUnifiedCreature = [&](Creature* c) {
+        if (!c || !c->isAlive() || creatureIndex >= AppState::MAX_CB_CREATURES) return;
+
+        CreatureMeshDX12* mesh = GetOrCreateCreatureMeshDX12(c->getGenome(), c->getType());
+        if (!mesh || !mesh->isValid()) {
+            return;
+        }
+
+        float baseScale = 2.2f;
+        CreatureType renderType = GetRenderBaseType(c->getType());
+        float typeScaleMultiplier = 1.0f;
+        switch (renderType) {
+            case CreatureType::HERBIVORE:
+                typeScaleMultiplier = 1.0f;
+                break;
+            case CreatureType::CARNIVORE:
+                typeScaleMultiplier = 1.2f;
+                break;
+            case CreatureType::AQUATIC:
+                typeScaleMultiplier = 1.1f;
+                break;
+            case CreatureType::FLYING:
+                typeScaleMultiplier = 0.8f;
+                break;
+            default:
+                typeScaleMultiplier = 1.0f;
+                break;
+        }
+
+        float maxEnergy = std::max(1.0f, c->getMaxEnergy());
+        float energyScaleFactor = 0.75f + 0.25f * std::clamp(c->getEnergy() / maxEnergy, 0.0f, 1.0f);
+        float finalScale = baseScale * typeScaleMultiplier * energyScaleFactor;
+        glm::vec3 velocity = c->getVelocity();
+        float speed = glm::length(velocity);
+
+        glm::vec3 baseColor = c->getSpeciesTintedColor();
+        glm::vec3 typeTint = GetTypeTint(c->getType());
+        glm::vec3 finalColor = glm::mix(baseColor, typeTint, 0.35f);
+        float energyBrightness = 0.6f + 0.4f * std::clamp(c->getEnergy() / maxEnergy, 0.0f, 1.0f);
+        finalColor *= energyBrightness;
+
+        float groundOffset = -mesh->boundsMin.y;
+        float surfaceHeight = GetCreatureRenderSurfaceHeight(*c);
+
+        AppState::CreatureConstants* cb = reinterpret_cast<AppState::CreatureConstants*>(
+            static_cast<u8*>(creatureCbData) + creatureIndex * 256);
+
+        memcpy(cb->viewProj, glm::value_ptr(viewProj), sizeof(float) * 16);
+        cb->viewPos[0] = cameraPos.x;
+        cb->viewPos[1] = cameraPos.y;
+        cb->viewPos[2] = cameraPos.z;
+        cb->viewPos[3] = 1.0f;
+
+        cb->lightDir[0] = lightDir.x;
+        cb->lightDir[1] = lightDir.y;
+        cb->lightDir[2] = lightDir.z;
+        cb->lightDir[3] = 0.0f;
+
+        cb->lightColor[0] = lightColor.x;
+        cb->lightColor[1] = lightColor.y;
+        cb->lightColor[2] = lightColor.z;
+        cb->lightColor[3] = 1.0f;
+
+        cb->time = g_app.world.simulationTime;
+        cb->padding[0] = cb->padding[1] = cb->padding[2] = 0.0f;
+
+        cb->objectPos[0] = c->getPosition().x;
+        cb->objectPos[1] = surfaceHeight + groundOffset * finalScale + CREATURE_GROUND_CLEARANCE;
+        cb->objectPos[2] = c->getPosition().z;
+        cb->objectPos[3] = 0.0f;
+
+        const Genome& genome = c->getGenome();
+        float lengthFactor = 0.9f + std::clamp((genome.speed - 5.0f) / 15.0f, 0.0f, 1.0f) * 0.3f;
+        float heightFactor = 0.9f + std::clamp((genome.efficiency - 0.5f) / 1.0f, 0.0f, 1.0f) * 0.2f;
+        float widthFactor = 0.85f + std::clamp((genome.size - 0.5f) / 1.5f, 0.0f, 1.0f) * 0.3f;
+        if (renderType == CreatureType::FLYING) {
+            float wingSpan = std::clamp(genome.wingSpan, 0.5f, 2.0f);
+            lengthFactor *= 0.8f + wingSpan * 0.3f;
+            widthFactor *= 0.7f + wingSpan * 0.35f;
+            heightFactor *= 0.85f;
+        } else if (renderType == CreatureType::AQUATIC) {
+            float tailSize = std::clamp(genome.tailSize, 0.5f, 1.2f);
+            float finSize = std::clamp(genome.finSize, 0.3f, 1.0f);
+            lengthFactor *= 0.85f + tailSize * 0.35f;
+            widthFactor *= 0.8f + finSize * 0.3f;
+            heightFactor *= 0.9f;
+        }
+        float phaseOffset = std::fmod(static_cast<float>(c->getID()) * 0.618f, 1.0f);
+        cb->objectScale[0] = finalScale * widthFactor;
+        cb->objectScale[1] = finalScale * heightFactor;
+        cb->objectScale[2] = finalScale * lengthFactor;
+        cb->objectScale[3] = phaseOffset;
+
+        cb->objectColor[0] = finalColor.x;
+        cb->objectColor[1] = finalColor.y;
+        cb->objectColor[2] = finalColor.z;
+        float typeTag = 0.0f;
+        if (renderType == CreatureType::FLYING) {
+            typeTag = 1.0f;
+        } else if (renderType == CreatureType::AQUATIC) {
+            typeTag = 2.0f;
+        }
+        cb->objectColor[3] = typeTag;
+
+        glm::vec3 renderDir = velocity;
+        if (glm::length(renderDir) < 0.01f) {
+            renderDir = glm::vec3(0.0f, 0.0f, 1.0f);
+        }
+        if (renderType != CreatureType::FLYING && renderType != CreatureType::AQUATIC) {
+            renderDir.y = 0.0f;
+        }
+        cb->objectDir[0] = renderDir.x;
+        cb->objectDir[1] = renderDir.y;
+        cb->objectDir[2] = renderDir.z;
+        cb->objectDir[3] = speed;
+
+        CreatureDrawItem item;
+        item.mesh = mesh;
+        item.cbOffset = static_cast<u32>(creatureIndex * 256);
+        drawItems.push_back(item);
+        creatureIndex++;
+    };
+
     // During replay, render from replay creatures; otherwise render live creatures
-    if (g_app.isPlayingReplay) {
+    if (useUnified) {
+        g_app.creatureManager->forEach([&](Creature& creature, size_t) {
+            addUnifiedCreature(&creature);
+        });
+    } else if (g_app.isPlayingReplay) {
         for (auto& c : g_app.replayCreatures) {
             addCreature(&c);
         }
@@ -3065,6 +3870,7 @@ void RenderCreatureNametags(const glm::mat4& viewProj, const glm::vec3& cameraPo
     ImGuiIO& io = ImGui::GetIO();
     ImDrawList* drawList = ImGui::GetForegroundDrawList();
     float maxDistSq = g_app.nametagMaxDistance * g_app.nametagMaxDistance;
+    const bool useUnified = g_app.useUnifiedSimulation && g_app.creatureManager;
 
     auto drawCreature = [&](SimCreature* c) {
         if (!c || !c->alive) return;
@@ -3101,7 +3907,46 @@ void RenderCreatureNametags(const glm::mat4& viewProj, const glm::vec3& cameraPo
         drawList->AddText(ImVec2(screenX, screenY), color, label);
     };
 
-    if (g_app.world.usePooling) {
+    auto drawUnifiedCreature = [&](const Creature* c) {
+        if (!c || !c->isAlive()) return;
+
+        glm::vec3 offsetPos = c->getPosition();
+        offsetPos.y += 2.5f + c->getGenome().size;
+
+        glm::vec4 clip = viewProj * glm::vec4(offsetPos, 1.0f);
+        if (clip.w <= 0.001f) return;
+
+        float ndcX = clip.x / clip.w;
+        float ndcY = clip.y / clip.w;
+        if (ndcX < -1.0f || ndcX > 1.0f || ndcY < -1.0f || ndcY > 1.0f) {
+            return;
+        }
+
+        glm::vec3 toCamera = offsetPos - cameraPos;
+        if (glm::dot(toCamera, toCamera) > maxDistSq) {
+            return;
+        }
+
+        float screenX = (ndcX * 0.5f + 0.5f) * io.DisplaySize.x;
+        float screenY = (1.0f - (ndcY * 0.5f + 0.5f)) * io.DisplaySize.y;
+
+        glm::vec3 tint = GetTypeTint(c->getType());
+        ImU32 color = IM_COL32(static_cast<int>(tint.r * 255.0f),
+                               static_cast<int>(tint.g * 255.0f),
+                               static_cast<int>(tint.b * 255.0f), 230);
+
+        char label[64];
+        std::snprintf(label, sizeof(label), "%s #%d E:%.0f",
+                      getCreatureTypeName(c->getType()), c->getID(), c->getEnergy());
+
+        drawList->AddText(ImVec2(screenX, screenY), color, label);
+    };
+
+    if (useUnified) {
+        g_app.creatureManager->forEach([&](Creature& creature, size_t) {
+            drawUnifiedCreature(&creature);
+        });
+    } else if (g_app.world.usePooling) {
         for (SimCreature* c : g_app.world.activeCreatures) {
             drawCreature(c);
         }
@@ -3131,6 +3976,7 @@ void RenderLoadingScreen() {
 
     ImGui::Text("%s", g_app.loadingStatus.c_str());
     ImGui::Spacing();
+    ImGui::Text("Progress: %.0f%%", g_app.loadingProgress * 100.0f);
     ImGui::ProgressBar(g_app.loadingProgress, ImVec2(-1, 0));
 
     ImGui::End();
@@ -3154,6 +4000,7 @@ void RenderHelpOverlay() {
         ImGui::BulletText("WASD - Move camera (FPS) / Move target (orbit)");
         ImGui::BulletText("Right Mouse + Drag - Rotate camera (orbit)");
         ImGui::BulletText("Mouse Scroll - Zoom in/out (orbit)");
+        ImGui::BulletText("R - Reset camera to default position");
 
         ImGui::Spacing();
         ImGui::Text("Simulation Controls:");
@@ -3674,6 +4521,70 @@ bool InitializeImGui() {
     }
 
     g_app.imguiInitialized = true;
+
+    // Phase 10 Agent 8: Setup selection system callback
+    g_app.selectionSystem.setOnSelectionChanged([](const ui::SelectionChangedEvent& event) {
+        if (event.newSelection) {
+            g_app.inspectionPanel.setInspectedCreature(event.newSelection);
+        } else if (event.wasCleared) {
+            g_app.inspectionPanel.clearInspection();
+        }
+    });
+
+    g_app.inspectionPanel.setFocusCameraCallback([](const Creature* creature) {
+        if (!creature) {
+            return;
+        }
+        glm::vec3 forward = creature->getVelocity();
+        if (glm::length(forward) < 0.01f) {
+            forward = glm::vec3(0.0f, 0.0f, 1.0f);
+        } else {
+            forward = glm::normalize(forward);
+        }
+        glm::vec3 target = creature->getPosition() + glm::vec3(0.0f, 2.0f, 0.0f);
+        glm::vec3 camPos = target - forward * 25.0f + glm::vec3(0.0f, 10.0f, 0.0f);
+        StartCameraTransition(camPos, target, 1.2f);
+        g_app.cameraFollowMode = AppState::CameraFollowMode::NONE;
+        g_app.followCreature = nullptr;
+        g_app.followCreatureId = -1;
+    });
+
+    g_app.inspectionPanel.setTrackCameraCallback([](const Creature* creature) {
+        if (!creature) {
+            return;
+        }
+        g_app.cameraFollowMode = AppState::CameraFollowMode::FOLLOW;
+        g_app.followCreature = creature;
+        g_app.followCreatureId = -1;
+        g_app.followOrbitAngle = g_app.cameraYaw;
+    });
+
+    g_app.inspectionPanel.setReleaseCameraCallback([]() {
+        g_app.cameraFollowMode = AppState::CameraFollowMode::NONE;
+        g_app.followCreature = nullptr;
+        g_app.followCreatureId = -1;
+    });
+
+    g_app.mainMenu.setOnStartGame([](const ui::WorldGenConfig& worldConfig,
+                                     const ui::EvolutionStartPreset& evolutionPreset,
+                                     bool godMode) {
+        StartWorldGeneration(worldConfig, evolutionPreset, godMode);
+    });
+
+    g_app.mainMenu.setOnContinue([]() {
+        g_app.world.paused = false;
+    });
+
+    g_app.mainMenu.setOnSettingsChanged([](const ui::SettingsConfig& settings) {
+        ApplySettingsConfig(settings);
+    });
+
+    g_app.mainMenu.setOnQuit([]() {
+        if (g_app.window) {
+            g_app.window->Close();
+        }
+    });
+
     return true;
 }
 
@@ -3712,6 +4623,9 @@ bool InitializeGPUSteering() {
 // Dispatch GPU Steering
 // ============================================================================
 void DispatchGPUSteering(std::vector<SteeringOutput>& results) {
+    if (g_app.useUnifiedSimulation) {
+        return;
+    }
     if (!g_app.gpuSteeringEnabled || !g_app.gpuSteering || !g_app.gpuSteering->IsInitialized()) {
         return;
     }
@@ -3822,6 +4736,56 @@ void DispatchGPUSteering(std::vector<SteeringOutput>& results) {
 
     auto endTime = std::chrono::high_resolution_clock::now();
     g_app.lastGPUComputeTime = std::chrono::duration<float, std::milli>(endTime - startTime).count();
+}
+
+// ============================================================================
+// Camera Control Overlay (PHASE 11 - Agent 10)
+// ============================================================================
+void RenderCameraControlOverlay() {
+    ImGuiIO& io = ImGui::GetIO();
+
+    // Position in bottom-right corner
+    ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x - 220, io.DisplaySize.y - 140), ImGuiCond_Always);
+    ImGui::SetNextWindowBgAlpha(0.6f);
+
+    ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration |
+                              ImGuiWindowFlags_NoInputs |
+                              ImGuiWindowFlags_AlwaysAutoResize |
+                              ImGuiWindowFlags_NoSavedSettings |
+                              ImGuiWindowFlags_NoFocusOnAppearing |
+                              ImGuiWindowFlags_NoNav;
+
+    if (ImGui::Begin("##CameraMode", nullptr, flags)) {
+        // Camera mode indicator
+        const char* modeText = "";
+        ImVec4 modeColor = ImVec4(1.0f, 1.0f, 1.0f, 1.0f);
+
+        if (g_app.mouseCaptured) {
+            modeText = "FPS MODE";
+            modeColor = ImVec4(0.2f, 1.0f, 0.2f, 1.0f);
+        } else if (g_app.cameraFollowMode != AppState::CameraFollowMode::NONE) {
+            modeText = "FOLLOW MODE";
+            modeColor = ImVec4(1.0f, 0.8f, 0.2f, 1.0f);
+        } else {
+            modeText = "ORBIT MODE";
+            modeColor = ImVec4(0.6f, 0.8f, 1.0f, 1.0f);
+        }
+
+        ImGui::TextColored(modeColor, "%s", modeText);
+
+        // Camera settings
+        ImGui::Text("Speed: %.0f", g_app.cameraMoveSpeed);
+        ImGui::Text("Sens: %.2f", g_app.mouseSensitivity);
+
+        // Quick tips based on mode
+        if (g_app.mouseCaptured) {
+            ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), "Left Click: Release");
+        } else {
+            ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), "Left Click: Capture");
+        }
+        ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), "R: Reset Camera");
+    }
+    ImGui::End();
 }
 
 // ============================================================================
@@ -4860,6 +5824,7 @@ void RenderDebugPanel() {
 // ============================================================================
 void UpdateFrame() {
     auto frameStart = std::chrono::high_resolution_clock::now();
+    LogWorldDiag("UpdateFrame begin.");
 
     // Reset per-frame timings
     g_app.timings.reset();
@@ -4891,16 +5856,64 @@ void UpdateFrame() {
         g_app.statusMessageTimer -= g_app.deltaTime;
     }
 
+    if (g_app.worldGenInProgress) {
+        g_app.loadingPulseTime += g_app.deltaTime;
+        g_app.worldGenElapsed += g_app.deltaTime;
+
+        {
+            std::lock_guard<std::mutex> lock(g_app.worldGenMutex);
+            if (!g_app.worldGenStage.empty()) {
+                g_app.loadingStatus = g_app.worldGenStage;
+            }
+            float progress = std::clamp(g_app.worldGenProgress, 0.0f, 0.95f);
+            g_app.loadingProgress = std::max(g_app.loadingProgress, progress);
+        }
+
+        if (g_app.worldGenFuture.valid()) {
+            if (g_app.worldGenFuture.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+                try {
+                    g_app.worldGenFuture.get();
+                    AppendRuntimeDiagLog("World generation future ready. Applying world data...");
+                    ApplyGeneratedWorldData(g_app.pendingProceduralConfig,
+                                            g_app.pendingEvolutionPreset,
+                                            g_app.pendingGodMode);
+                    AppendRuntimeDiagLog("ApplyGeneratedWorldData returned.");
+                } catch (const std::exception& ex) {
+                    g_app.statusMessage = std::string("World generation failed: ") + ex.what();
+                    g_app.statusMessageTimer = 5.0f;
+                    g_app.isLoading = false;
+                    g_app.worldGenInProgress = false;
+                    g_app.mainMenu.setActive(true);
+                    AppendWorldGenMainLog(std::string("World generation failed: ") + ex.what());
+                }
+            }
+        } else {
+            g_app.isLoading = false;
+            g_app.worldGenInProgress = false;
+            AppendWorldGenMainLog("World generation future invalid.");
+        }
+    }
+
+    const bool menuActive = g_app.mainMenu.isActive();
+    const bool worldReady = g_app.hasGeneratedWorld && !g_app.isLoading;
+    if (g_app.worldDiagnostics && g_app.worldDiagnosticsFrames > 0) {
+        LogWorldDiag(std::string("UpdateFrame state: menuActive=") +
+                     (menuActive ? "true" : "false") +
+                     " worldReady=" + (worldReady ? "true" : "false") +
+                     " loading=" + (g_app.isLoading ? "true" : "false") +
+                     " unified=" + (g_app.useUnifiedSimulation ? "true" : "false"));
+    }
+
     // Update notifications (Phase 5)
     g_app.notifications.update(g_app.deltaTime);
 
     // Update day/night cycle
-    if (!g_app.world.paused && !g_app.isPlayingReplay) {
+    if (!menuActive && worldReady && !g_app.world.paused && !g_app.isPlayingReplay) {
         g_app.dayNight.Update(g_app.deltaTime * g_app.world.timeScale);
     }
 
     // Update auto-save timer (only when simulation is running)
-    if (!g_app.world.paused && !g_app.isPlayingReplay) {
+    if (!menuActive && worldReady && !g_app.world.paused && !g_app.isPlayingReplay) {
         g_app.saveManager.update(g_app.deltaTime);
     }
 
@@ -4925,27 +5938,50 @@ void UpdateFrame() {
     }
 
     // Update follow camera mode
-    if (g_app.cameraFollowMode != AppState::CameraFollowMode::NONE &&
-        g_app.followCreatureId >= 0 && !g_app.cameraTransition.active) {
+    if (g_app.cameraFollowMode != AppState::CameraFollowMode::NONE && !g_app.cameraTransition.active) {
+        bool hasTarget = false;
+        glm::vec3 creaturePos(0.0f);
+        glm::vec3 creatureDir(0.0f, 0.0f, 1.0f);
 
-        glm::vec3 creaturePos = GetCreaturePosition(g_app.followCreatureId);
-        glm::vec3 creatureDir = GetCreatureVelocity(g_app.followCreatureId);
+        if (g_app.useUnifiedSimulation) {
+            if (g_app.followCreature && g_app.followCreature->isAlive()) {
+                creaturePos = g_app.followCreature->getPosition();
+                creatureDir = g_app.followCreature->getVelocity();
+                if (glm::length(creatureDir) < 0.01f) {
+                    creatureDir = glm::vec3(0.0f, 0.0f, 1.0f);
+                } else {
+                    creatureDir = glm::normalize(creatureDir);
+                }
+                hasTarget = true;
+            }
+        } else if (g_app.followCreatureId >= 0) {
+            creaturePos = GetCreaturePosition(g_app.followCreatureId);
+            creatureDir = GetCreatureVelocity(g_app.followCreatureId);
+            hasTarget = true;
+        }
 
-        // Apply user orbit angle offset
-        float angle = atan2(creatureDir.z, creatureDir.x) + glm::radians(g_app.followOrbitAngle);
-        glm::vec3 offsetDir = glm::vec3(cos(angle), 0.0f, sin(angle));
+        if (!hasTarget) {
+            g_app.cameraFollowMode = AppState::CameraFollowMode::NONE;
+            g_app.followCreatureId = -1;
+            g_app.followCreature = nullptr;
+        } else {
 
-        // Calculate desired camera position
-        glm::vec3 desiredPos = creaturePos - offsetDir * g_app.followDistance +
-                               glm::vec3(0.0f, g_app.followHeight, 0.0f);
+            // Apply user orbit angle offset
+            float angle = atan2(creatureDir.z, creatureDir.x) + glm::radians(g_app.followOrbitAngle);
+            glm::vec3 offsetDir = glm::vec3(cos(angle), 0.0f, sin(angle));
 
-        // Smooth interpolation to follow creature
-        g_app.cameraPosition = SmoothDamp(g_app.cameraPosition, desiredPos,
-                                           g_app.followVelocity,
-                                           1.0f / g_app.followSmoothing, g_app.deltaTime);
+            // Calculate desired camera position
+            glm::vec3 desiredPos = creaturePos - offsetDir * g_app.followDistance +
+                                   glm::vec3(0.0f, g_app.followHeight, 0.0f);
 
-        // Look at creature (slightly above ground)
-        g_app.cameraTarget = creaturePos + glm::vec3(0.0f, 2.0f, 0.0f);
+            // Smooth interpolation to follow creature
+            g_app.cameraPosition = SmoothDamp(g_app.cameraPosition, desiredPos,
+                                              g_app.followVelocity,
+                                              1.0f / g_app.followSmoothing, g_app.deltaTime);
+
+            // Look at creature (slightly above ground)
+            g_app.cameraTarget = creaturePos + glm::vec3(0.0f, 2.0f, 0.0f);
+        }
     }
 
     // Update cinematic camera mode
@@ -4971,52 +6007,91 @@ void UpdateFrame() {
     }
 
     // Handle replay playback mode (S-06)
-    if (g_app.isPlayingReplay) {
+    if (!menuActive && worldReady && g_app.isPlayingReplay && !g_app.useUnifiedSimulation) {
         g_app.replayPlayer.update(g_app.deltaTime);
         ApplyReplayFrame(g_app.replayPlayer.getInterpolatedFrame());
-    } else {
+    } else if (!menuActive && worldReady) {
         // Normal simulation mode
 
-        // Profile GPU steering dispatch
-        std::vector<SteeringOutput> steeringResults;
-        if (g_app.gpuSteeringEnabled && g_app.world.GetAliveCount() >= GPU_STEERING_THRESHOLD) {
-            DispatchGPUSteering(steeringResults);
-        }
+        if (g_app.useUnifiedSimulation && g_app.creatureManager) {
+            auto creatureStart = std::chrono::high_resolution_clock::now();
+            LogWorldDiag("UpdateUnifiedSimulation begin.");
+            UpdateUnifiedSimulation(g_app.deltaTime);
+            LogWorldDiag("UpdateUnifiedSimulation end.");
+            auto creatureEnd = std::chrono::high_resolution_clock::now();
+            g_app.timings.creatureUpdate = std::chrono::duration<float>(creatureEnd - creatureStart).count();
 
-        // Profile creature update
-        auto creatureStart = std::chrono::high_resolution_clock::now();
-        if (!steeringResults.empty()) {
-            g_app.world.Update(g_app.deltaTime, &steeringResults);
+            const auto& stats = g_app.creatureManager->getStats();
+            int herbivores = stats.byType[static_cast<size_t>(CreatureType::GRAZER)] +
+                             stats.byType[static_cast<size_t>(CreatureType::BROWSER)] +
+                             stats.byType[static_cast<size_t>(CreatureType::FRUGIVORE)];
+            int carnivores = stats.byType[static_cast<size_t>(CreatureType::SMALL_PREDATOR)] +
+                             stats.byType[static_cast<size_t>(CreatureType::OMNIVORE)] +
+                             stats.byType[static_cast<size_t>(CreatureType::APEX_PREDATOR)] +
+                             stats.byType[static_cast<size_t>(CreatureType::SCAVENGER)];
+            int aquatic = stats.byDomain[static_cast<size_t>(Forge::CreatureDomain::WATER)];
+            int flying = stats.byDomain[static_cast<size_t>(Forge::CreatureDomain::AIR)];
+
+            g_app.gameplay.update(g_app.deltaTime, g_app.world.simulationTime, g_app.creatureManager.get());
+            g_app.gameplay.updatePopulation(
+                stats.alive,
+                herbivores,
+                carnivores,
+                aquatic,
+                flying
+            );
+            g_app.world.maxGeneration = std::max(g_app.world.maxGeneration,
+                                                 static_cast<uint32_t>(stats.currentGeneration));
+
+            Forge::SimulationStats simStats;
+            simStats.dayCount = g_app.seasonManager.getCurrentDay();
+            simStats.totalCreatures = stats.alive;
+            simStats.maxGeneration = stats.currentGeneration;
+            simStats.simulationTime = g_app.world.simulationTime;
+            g_app.simulationOrchestrator.updateStats(simStats);
         } else {
-            g_app.world.Update(g_app.deltaTime, nullptr);
+            // Profile GPU steering dispatch
+            std::vector<SteeringOutput> steeringResults;
+            if (g_app.gpuSteeringEnabled && g_app.world.GetAliveCount() >= GPU_STEERING_THRESHOLD) {
+                DispatchGPUSteering(steeringResults);
+            }
+
+            // Profile creature update
+            auto creatureStart = std::chrono::high_resolution_clock::now();
+            LogWorldDiag("UpdateSimulationWorld begin.");
+            if (!steeringResults.empty()) {
+                g_app.world.Update(g_app.deltaTime, &steeringResults);
+            } else {
+                g_app.world.Update(g_app.deltaTime, nullptr);
+            }
+            LogWorldDiag("UpdateSimulationWorld end.");
+            auto creatureEnd = std::chrono::high_resolution_clock::now();
+            g_app.timings.creatureUpdate = std::chrono::duration<float>(creatureEnd - creatureStart).count();
+
+            // Profile replay recording (S-05)
+            if (g_app.isRecording) {
+                auto replayStart = std::chrono::high_resolution_clock::now();
+                float scaledDt = g_app.deltaTime * g_app.world.timeScale;
+                g_app.replayRecorder.update(scaledDt, g_app.world.simulationTime);
+                Forge::ReplayFrame frame = BuildReplayFrame();
+                g_app.replayRecorder.recordFrame(frame);
+                auto replayEnd = std::chrono::high_resolution_clock::now();
+                g_app.timings.replayRecording = std::chrono::duration<float>(replayEnd - replayStart).count();
+            }
+
+            // Update gameplay systems (Agent 26 - Fun Factor)
+            // Note: GameplayManager needs a CreatureManager, but we use SimulationWorld
+            g_app.gameplay.update(g_app.deltaTime, g_app.world.simulationTime, nullptr);
+
+            // Update population stats for gameplay manager
+            g_app.gameplay.updatePopulation(
+                static_cast<int>(g_app.world.GetAliveCount()),
+                static_cast<int>(g_app.world.herbivoreCount),
+                static_cast<int>(g_app.world.carnivoreCount),
+                0, // aquatic count (not tracked separately in SimulationWorld)
+                0  // flying count (not tracked separately in SimulationWorld)
+            );
         }
-        auto creatureEnd = std::chrono::high_resolution_clock::now();
-        g_app.timings.creatureUpdate = std::chrono::duration<float>(creatureEnd - creatureStart).count();
-
-        // Profile replay recording (S-05)
-        if (g_app.isRecording) {
-            auto replayStart = std::chrono::high_resolution_clock::now();
-            float scaledDt = g_app.deltaTime * g_app.world.timeScale;
-            g_app.replayRecorder.update(scaledDt, g_app.world.simulationTime);
-            Forge::ReplayFrame frame = BuildReplayFrame();
-            g_app.replayRecorder.recordFrame(frame);
-            auto replayEnd = std::chrono::high_resolution_clock::now();
-            g_app.timings.replayRecording = std::chrono::duration<float>(replayEnd - replayStart).count();
-        }
-
-        // Update gameplay systems (Agent 26 - Fun Factor)
-        // Note: GameplayManager needs a CreatureManager, but we use SimulationWorld
-        // We update the gameplay manager with deltaTime and simulationTime
-        g_app.gameplay.update(g_app.deltaTime, g_app.world.simulationTime, nullptr);
-
-        // Update population stats for gameplay manager
-        g_app.gameplay.updatePopulation(
-            static_cast<int>(g_app.world.GetAliveCount()),
-            static_cast<int>(g_app.world.herbivoreCount),
-            static_cast<int>(g_app.world.carnivoreCount),
-            0, // aquatic count (not tracked separately in SimulationWorld)
-            0  // flying count (not tracked separately in SimulationWorld)
-        );
 
         // Update stress test (Agent 30 - Performance Testing)
         UpdateStressTest(g_app.deltaTime);
@@ -5040,6 +6115,8 @@ void UpdateFrame() {
         g_app.cameraPosition.y = g_app.cameraTarget.y + g_app.cameraDistance * sin(pitchRad);
         g_app.cameraPosition.z = g_app.cameraTarget.z + g_app.cameraDistance * cos(pitchRad) * cos(yawRad);
     }
+
+    LogWorldDiag("UpdateFrame end.");
 }
 
 // ============================================================================
@@ -5047,6 +6124,10 @@ void UpdateFrame() {
 // ============================================================================
 void RenderFrame() {
     auto renderStart = std::chrono::high_resolution_clock::now();
+    const bool diagActive = g_app.worldDiagnostics && g_app.worldDiagnosticsFrames > 0;
+    if (diagActive) {
+        LogWorldDiag("RenderFrame begin.");
+    }
 
     // Wait for previous frame
     g_app.frameFence->Wait(g_app.fenceValue);
@@ -5098,91 +6179,143 @@ void RenderFrame() {
     glm::mat4 sceneProj = glm::perspectiveRH_ZO(glm::radians(CAMERA_FOV_DEGREES), aspectRatio, 0.1f, 5000.0f);
     glm::mat4 sceneViewProj = sceneProj * sceneView;
 
-    // Render 3D scene - terrain first (replaces ground plane when enabled)
-    if (g_app.terrainRenderingEnabled && g_app.terrainRenderer && g_app.terrainRenderer->isInitialized() && g_app.terrainPipeline) {
-        // Get elapsed time for animation
-        static auto terrainStartTime = std::chrono::high_resolution_clock::now();
-        auto now = std::chrono::high_resolution_clock::now();
-        float terrainTime = std::chrono::duration<float>(now - terrainStartTime).count();
+    const bool menuActive = g_app.mainMenu.isActive();
+    const bool worldReady = g_app.hasGeneratedWorld && !g_app.isLoading;
+    const bool renderWorld = worldReady && !menuActive;
+    const bool renderGameUI = worldReady && !menuActive;
 
-        // Render terrain
-        g_app.terrainRenderer->render(
-            g_app.commandList.get(),
-            g_app.terrainPipeline.get(),
-            sceneView,
-            sceneProj,
-            g_app.cameraPosition,
-            lightDir,
-            lightColor,
-            terrainTime
-        );
-    } else {
-        // Fallback: Simple ground plane if terrain not available
-        RenderGroundPlane(sceneViewProj, g_app.cameraPosition, lightDir, lightColor);
+    if (diagActive) {
+        LogWorldDiag(std::string("RenderFrame state: renderWorld=") +
+                     (renderWorld ? "true" : "false") +
+                     " renderUI=" + (renderGameUI ? "true" : "false"));
     }
 
-    // Render grass (after terrain, before water and creatures)
-    if (g_app.grassRenderingEnabled && g_app.grassRenderer && g_app.grassPipeline) {
-        static auto grassStartTime = std::chrono::high_resolution_clock::now();
-        auto now = std::chrono::high_resolution_clock::now();
-        float grassTime = std::chrono::duration<float>(now - grassStartTime).count();
+    if (renderWorld) {
+        // Render 3D scene - terrain first (replaces ground plane when enabled)
+        if (g_app.terrainRenderingEnabled && g_app.terrainRenderer && g_app.terrainRenderer->isInitialized() && g_app.terrainPipeline) {
+            // Get elapsed time for animation
+            static auto terrainStartTime = std::chrono::high_resolution_clock::now();
+            auto now = std::chrono::high_resolution_clock::now();
+            float terrainTime = std::chrono::duration<float>(now - terrainStartTime).count();
 
-        // Update visible grass instances based on camera position
-        g_app.grassRenderer->updateInstances(g_app.cameraPosition);
+            // Render terrain
+            if (diagActive) {
+                LogWorldDiag("RenderFrame terrain begin.");
+            }
+            g_app.terrainRenderer->render(
+                g_app.commandList.get(),
+                g_app.terrainPipeline.get(),
+                sceneView,
+                sceneProj,
+                g_app.cameraPosition,
+                lightDir,
+                lightColor,
+                terrainTime
+            );
+            if (diagActive) {
+                LogWorldDiag("RenderFrame terrain end.");
+            }
+        } else {
+            // Fallback: Simple ground plane if terrain not available
+            if (diagActive) {
+                LogWorldDiag("RenderFrame terrain fallback.");
+            }
+            RenderGroundPlane(sceneViewProj, g_app.cameraPosition, lightDir, lightColor);
+        }
 
-        // Render grass
-        g_app.grassRenderer->render(
-            g_app.commandList.get(),
-            g_app.grassPipeline.get(),
-            sceneViewProj,
-            g_app.cameraPosition,
-            lightDir,
-            lightColor,
-            grassTime
-        );
+        // Render grass (after terrain, before water and creatures)
+        if (g_app.grassRenderingEnabled && g_app.grassRenderer && g_app.grassPipeline) {
+            static auto grassStartTime = std::chrono::high_resolution_clock::now();
+            auto now = std::chrono::high_resolution_clock::now();
+            float grassTime = std::chrono::duration<float>(now - grassStartTime).count();
+
+            // Update visible grass instances based on camera position
+            if (diagActive) {
+                LogWorldDiag("RenderFrame grass update begin.");
+            }
+            g_app.grassRenderer->updateInstances(g_app.cameraPosition);
+            if (diagActive) {
+                LogWorldDiag("RenderFrame grass update end.");
+            }
+
+            // Render grass
+            if (diagActive) {
+                LogWorldDiag("RenderFrame grass render begin.");
+            }
+            g_app.grassRenderer->render(
+                g_app.commandList.get(),
+                g_app.grassPipeline.get(),
+                sceneViewProj,
+                g_app.cameraPosition,
+                lightDir,
+                lightColor,
+                grassTime
+            );
+            if (diagActive) {
+                LogWorldDiag("RenderFrame grass render end.");
+            }
+        }
+
+        // Render trees (after grass, before water and creatures)
+        if (g_app.treeRenderingEnabled && g_app.treeRenderer && g_app.treePipeline) {
+            static auto treeStartTime = std::chrono::high_resolution_clock::now();
+            auto now = std::chrono::high_resolution_clock::now();
+            float treeTime = std::chrono::duration<float>(now - treeStartTime).count();
+
+            // Render trees
+            if (diagActive) {
+                LogWorldDiag("RenderFrame trees begin.");
+            }
+            g_app.treeRenderer->render(
+                g_app.commandList.get(),
+                g_app.treePipeline.get(),
+                sceneViewProj,
+                g_app.cameraPosition,
+                lightDir,
+                lightColor,
+                treeTime
+            );
+            if (diagActive) {
+                LogWorldDiag("RenderFrame trees end.");
+            }
+        }
+
+        // Render water (after terrain, grass, and trees, before creatures)
+        if (g_app.waterRenderingEnabled && g_app.waterRenderer.IsInitialized()) {
+            // Calculate elapsed time for water animation
+            static auto startTime = std::chrono::high_resolution_clock::now();
+            auto now = std::chrono::high_resolution_clock::now();
+            float elapsedTime = std::chrono::duration<float>(now - startTime).count();
+
+            // Light direction (sun direction, pointing towards light source)
+            float sunIntensity = sky.sunIntensity;
+
+            if (diagActive) {
+                LogWorldDiag("RenderFrame water begin.");
+            }
+            g_app.waterRenderer.Render(
+                g_app.commandList.get(),
+                sceneView,
+                sceneProj,
+                g_app.cameraPosition,
+                lightDir,
+                lightColor,
+                sunIntensity,
+                elapsedTime
+            );
+            if (diagActive) {
+                LogWorldDiag("RenderFrame water end.");
+            }
+        }
+
+        if (diagActive) {
+            LogWorldDiag("RenderFrame creatures begin.");
+        }
+        RenderCreatures(sceneViewProj, g_app.cameraPosition, lightDir, lightColor);
+        if (diagActive) {
+            LogWorldDiag("RenderFrame creatures end.");
+        }
     }
-
-    // Render trees (after grass, before water and creatures)
-    if (g_app.treeRenderingEnabled && g_app.treeRenderer && g_app.treePipeline) {
-        static auto treeStartTime = std::chrono::high_resolution_clock::now();
-        auto now = std::chrono::high_resolution_clock::now();
-        float treeTime = std::chrono::duration<float>(now - treeStartTime).count();
-
-        // Render trees
-        g_app.treeRenderer->render(
-            g_app.commandList.get(),
-            g_app.treePipeline.get(),
-            sceneViewProj,
-            g_app.cameraPosition,
-            lightDir,
-            lightColor,
-            treeTime
-        );
-    }
-
-    // Render water (after terrain, grass, and trees, before creatures)
-    if (g_app.waterRenderingEnabled && g_app.waterRenderer.IsInitialized()) {
-        // Calculate elapsed time for water animation
-        static auto startTime = std::chrono::high_resolution_clock::now();
-        auto now = std::chrono::high_resolution_clock::now();
-        float elapsedTime = std::chrono::duration<float>(now - startTime).count();
-
-        // Light direction (sun direction, pointing towards light source)
-        float sunIntensity = sky.sunIntensity;
-
-        g_app.waterRenderer.Render(
-            g_app.commandList.get(),
-            sceneView,
-            sceneProj,
-            g_app.cameraPosition,
-            lightDir,
-            lightColor,
-            sunIntensity,
-            elapsedTime
-        );
-    }
-
-    RenderCreatures(sceneViewProj, g_app.cameraPosition, lightDir, lightColor);
 
     // Measure main rendering time
     auto renderingEnd = std::chrono::high_resolution_clock::now();
@@ -5192,31 +6325,63 @@ void RenderFrame() {
     if (g_app.imguiInitialized) {
         auto uiStart = std::chrono::high_resolution_clock::now();
 
+        if (diagActive) {
+            LogWorldDiag("RenderFrame ImGui begin.");
+        }
         ImGui_ImplDX12_NewFrame();
         ImGui_ImplWin32_NewFrame();
         ImGui::NewFrame();
 
-        RenderCreatureNametags(sceneViewProj, g_app.cameraPosition);
+        // Phase 10 Agent 8: Update camera object to match orbit camera
+        g_app.camera.Position = g_app.cameraPosition;
+        g_app.camera.Yaw = g_app.cameraYaw;
+        g_app.camera.Pitch = g_app.cameraPitch;
+        g_app.camera.updateCameraVectors();
 
-        // Debug: Always show a simple window to verify ImGui works
-        ImGui::SetNextWindowPos(ImVec2(50, 50), ImGuiCond_FirstUseEver);
-        ImGui::Begin("Status");
-        ImGui::Text("Simulation Running!");
-        ImGui::Text("Creatures: %u", g_app.world.GetAliveCount());
-        ImGui::Text("FPS: %.1f", g_app.fps);
-        ImGui::Text("Press F1 for full debug panel");
-        ImGui::End();
+        // Phase 10 Agent 8: Update selection system
+        if (renderGameUI && g_app.useUnifiedSimulation && g_app.creatureManager) {
+            g_app.selectionSystem.update(g_app.camera, *g_app.creatureManager,
+                                        (float)WINDOW_WIDTH, (float)WINDOW_HEIGHT);
+        }
 
-        RenderDebugPanel();
-        RenderPerformanceOverlay();
-        RenderMinimalFPSOverlay();  // Agent 30: Always-visible FPS overlay
-        RenderHelpOverlay();
-        RenderCreatureInfoPanel();
-        RenderCameraSettingsPanel();
+        if (renderGameUI && g_app.godModeEnabled) {
+            ImGuiIO& io = ImGui::GetIO();
+            g_app.godModeUI.setEnabled(true);
+            g_app.godModeUI.setScreenSize(io.DisplaySize.x, io.DisplaySize.y);
+            g_app.godModeUI.update(g_app.deltaTime);
+            g_app.godModeUI.render();
+            g_app.godModeUI.renderOverlays();
+        } else {
+            g_app.godModeUI.setEnabled(false);
+        }
+
+        if (renderGameUI) {
+            RenderCreatureNametags(sceneViewProj, g_app.cameraPosition);
+
+            // Debug: Always show a simple window to verify ImGui works
+            ImGui::SetNextWindowPos(ImVec2(50, 50), ImGuiCond_FirstUseEver);
+            ImGui::Begin("Status");
+            ImGui::Text("Simulation Running!");
+            int creatureCount = g_app.useUnifiedSimulation && g_app.creatureManager
+                ? g_app.creatureManager->getTotalPopulation()
+                : static_cast<int>(g_app.world.GetAliveCount());
+            ImGui::Text("Creatures: %d", creatureCount);
+            ImGui::Text("FPS: %.1f", g_app.fps);
+            ImGui::Text("Press F1 for full debug panel");
+            ImGui::End();
+
+            RenderDebugPanel();
+            RenderPerformanceOverlay();
+            RenderMinimalFPSOverlay();  // Agent 30: Always-visible FPS overlay
+            RenderCameraControlOverlay();  // PHASE 11 Agent 10: Camera mode indicator
+            RenderHelpOverlay();
+            RenderCreatureInfoPanel();
+            RenderCameraSettingsPanel();
+        }
         RenderLoadingScreen();
 
         // Render gameplay UI (Agent 26 - Fun Factor)
-        {
+        if (renderGameUI) {
             ImGuiIO& io = ImGui::GetIO();
             // Sync pause state between world and gameplay manager
             g_app.gameplay.setPaused(g_app.world.paused);
@@ -5228,8 +6393,21 @@ void RenderFrame() {
         }
 
         // Render notifications
-        ImGuiIO& io = ImGui::GetIO();
-        g_app.notifications.render(io.DisplaySize.x);
+        if (renderGameUI) {
+            ImGuiIO& io = ImGui::GetIO();
+            g_app.notifications.render(io.DisplaySize.x);
+        }
+
+        // Phase 10 Agent 8: Render inspection panel and selection indicators
+        if (renderGameUI && g_app.useUnifiedSimulation) {
+            g_app.inspectionPanel.render();
+            g_app.selectionSystem.renderSelectionIndicators(g_app.camera, (float)WINDOW_WIDTH, (float)WINDOW_HEIGHT);
+            g_app.inspectionPanel.renderScreenIndicator(g_app.camera, (float)WINDOW_WIDTH, (float)WINDOW_HEIGHT);
+        }
+
+        if (g_app.mainMenu.isActive()) {
+            g_app.mainMenu.render();
+        }
 
         ImGui::Render();
 
@@ -5241,6 +6419,9 @@ void RenderFrame() {
 
         auto uiEnd = std::chrono::high_resolution_clock::now();
         g_app.timings.uiRendering = std::chrono::duration<float>(uiEnd - uiStart).count();
+        if (diagActive) {
+            LogWorldDiag("RenderFrame ImGui end.");
+        }
     }
 
     // Transition to present
@@ -5263,6 +6444,14 @@ void RenderFrame() {
     auto frameEnd = std::chrono::high_resolution_clock::now();
     g_app.timings.total = std::chrono::duration<float>(frameEnd - renderStart).count();
     g_app.timings.pushHistory();
+
+    if (g_app.worldDiagnostics && g_app.worldDiagnosticsFrames > 0) {
+        g_app.worldDiagnosticsFrames--;
+        if (g_app.worldDiagnosticsFrames == 0) {
+            AppendRuntimeDiagLog("Diagnostics complete.");
+            g_app.worldDiagnostics = false;
+        }
+    }
 }
 
 // ============================================================================
@@ -5355,10 +6544,15 @@ void HandleInput() {
     bool f10Down = g_app.window->IsKeyDown(KeyCode::F10);
     if (!blockKeyboard && f10Down) {
         if (!f10Pressed) {
-            if (g_app.isPlayingReplay) {
-                ExitReplayMode();
+            if (g_app.useUnifiedSimulation) {
+                g_app.statusMessage = "Replay disabled in unified simulation";
+                g_app.statusMessageTimer = 2.0f;
             } else {
-                EnterReplayMode();
+                if (g_app.isPlayingReplay) {
+                    ExitReplayMode();
+                } else {
+                    EnterReplayMode();
+                }
             }
         }
     }
@@ -5398,10 +6592,29 @@ void HandleInput() {
         return;
     }
 
+    // Camera reset (R key) - PHASE 11 Agent 10
+    static bool rKeyPressed = false;
+    if (!blockKeyboard) {
+        bool rKeyDown = g_app.window->IsKeyDown(KeyCode::R);
+        if (rKeyDown && !rKeyPressed) {
+            // Reset to default camera position and orientation
+            g_app.cameraPosition = glm::vec3(0.0f, 100.0f, 200.0f);
+            g_app.cameraTarget = glm::vec3(0.0f, 0.0f, 0.0f);
+            g_app.cameraYaw = 0.0f;
+            g_app.cameraPitch = 30.0f;
+            g_app.cameraDistance = 200.0f;
+            g_app.mouseCaptured = false;
+            g_app.window->SetCursorLocked(false);
+            g_app.cameraFollowMode = AppState::CameraFollowMode::NONE;
+        }
+        rKeyPressed = rKeyDown;
+    }
+
     // Camera controls
     if (g_app.mouseCaptured) {
+        // FPS mode (mouse captured) - WASD moves camera
         if (!blockKeyboard) {
-            float moveSpeed = 120.0f * g_app.deltaTime;
+            float moveSpeed = g_app.cameraMoveSpeed * g_app.deltaTime;
 
             float yawRad = glm::radians(g_app.cameraYaw);
             float pitchRad = glm::radians(g_app.cameraPitch);
@@ -5427,6 +6640,7 @@ void HandleInput() {
             }
         }
 
+        // Mouse look (FPS mode)
         if (!blockMouse) {
             Math::Vec2 delta = g_app.window->GetMouseDelta();
             // Apply mouse inversion settings (default: move mouse right = look right)
@@ -5434,6 +6648,7 @@ void HandleInput() {
             float yMult = g_app.invertMouseY ? 1.0f : -1.0f;
             g_app.cameraYaw += delta.x * g_app.mouseSensitivity * xMult;
             g_app.cameraPitch += delta.y * g_app.mouseSensitivity * yMult;
+            // Clamp pitch to prevent gimbal lock
             g_app.cameraPitch = glm::clamp(g_app.cameraPitch, -89.0f, 89.0f);
         }
     } else {
@@ -5462,9 +6677,9 @@ void HandleInput() {
                 }
             }
         } else {
-            // Free orbit mode
+            // Free orbit mode - WASD moves camera target point
             if (!blockKeyboard) {
-                float moveSpeed = 100.0f * g_app.deltaTime;
+                float moveSpeed = g_app.cameraMoveSpeed * g_app.deltaTime;
 
                 if (g_app.window->IsKeyDown(KeyCode::W)) {
                     g_app.cameraTarget.z -= moveSpeed;
@@ -5481,14 +6696,16 @@ void HandleInput() {
             }
         }
 
-        // Mouse camera rotation (when right button held)
+        // Mouse camera rotation (when right button held in orbit mode)
         if (!blockMouse && g_app.window->IsMouseButtonDown(MouseButton::Right)) {
             Math::Vec2 delta = g_app.window->GetMouseDelta();
             // Apply mouse inversion settings
             float xMult = g_app.invertMouseX ? 1.0f : -1.0f;
             float yMult = g_app.invertMouseY ? 1.0f : -1.0f;
-            g_app.cameraYaw += delta.x * 0.5f * xMult;
-            g_app.cameraPitch += delta.y * 0.5f * yMult;
+            // Use same sensitivity as FPS mode for consistency
+            g_app.cameraYaw += delta.x * g_app.mouseSensitivity * xMult;
+            g_app.cameraPitch += delta.y * g_app.mouseSensitivity * yMult;
+            // Orbit mode pitch range (10 to 89 to avoid looking straight down/up)
             g_app.cameraPitch = glm::clamp(g_app.cameraPitch, 10.0f, 89.0f);
         }
 
@@ -5555,6 +6772,16 @@ void HandleInput() {
                 // Exit follow mode
                 g_app.cameraFollowMode = AppState::CameraFollowMode::NONE;
                 g_app.followCreatureId = -1;
+                g_app.followCreature = nullptr;
+            } else if (g_app.useUnifiedSimulation) {
+                Creature* selected = g_app.selectionSystem.getSelectedCreature();
+                if (selected) {
+                    // Enter follow mode with selected creature
+                    g_app.cameraFollowMode = AppState::CameraFollowMode::FOLLOW;
+                    g_app.followCreature = selected;
+                    g_app.followCreatureId = -1;
+                    g_app.followOrbitAngle = g_app.cameraYaw;
+                }
             } else if (g_app.selectedCreatureIndex >= 0) {
                 // Enter follow mode with selected creature
                 g_app.cameraFollowMode = AppState::CameraFollowMode::FOLLOW;
@@ -5570,6 +6797,7 @@ void HandleInput() {
         if (g_app.window->IsKeyDown(KeyCode::Escape)) {
             g_app.cameraFollowMode = AppState::CameraFollowMode::NONE;
             g_app.followCreatureId = -1;
+            g_app.followCreature = nullptr;
             g_app.cinematicPlaying = false;
         }
     }
@@ -5579,6 +6807,10 @@ void HandleInput() {
 // Cleanup
 // ============================================================================
 void Cleanup() {
+    if (g_app.worldGenFuture.valid()) {
+        g_app.worldGenFuture.wait();
+    }
+
     // Wait for GPU to finish
     if (g_app.device) {
         g_app.device->WaitIdle();
@@ -6396,8 +7628,8 @@ float voronoi(float3 p) {
 }
 
 // Biome thresholds (normalized height 0-1)
-static const float WATER_LEVEL = 0.35;
-static const float BEACH_LEVEL = 0.42;
+#define WATER_LEVEL terrainScale.z
+#define BEACH_LEVEL (terrainScale.z + 0.07)
 static const float GRASS_LEVEL = 0.65;
 static const float FOREST_LEVEL = 0.80;
 static const float ROCK_LEVEL = 0.92;
@@ -6832,6 +8064,15 @@ float4 main(PSInput input) : SV_TARGET {
     std::cout << "  Gameplay manager initialized" << std::endl;
     std::cout << "  Achievements, events, and highlights ready" << std::endl;
 
+    // PHASE 10 - Agent 1: Initialize CreatureManager (unified creature system)
+    std::cout << "Initializing CreatureManager (Phase 10 - unified simulation)..." << std::endl;
+    g_app.creatureManager = std::make_unique<Forge::CreatureManager>(500.0f, 500.0f);
+    // Note: terrain and ecosystem managers are not yet created in this codebase
+    // For now, initialize with nullptr - spawn will still work
+    g_app.creatureManager->init(nullptr, nullptr, 42);
+    std::cout << "  CreatureManager initialized (max: " << Forge::CreatureManager::MAX_CREATURES << " creatures)" << std::endl;
+    std::cout << "  Spatial grid resolution: " << Forge::CreatureManager::GRID_RESOLUTION << "x" << Forge::CreatureManager::GRID_RESOLUTION << std::endl;
+
     std::cout << std::endl;
     std::cout << "==================================================" << std::endl;
     std::cout << "Simulation started!" << std::endl;
@@ -6841,6 +8082,7 @@ float4 main(PSInput input) : SV_TARGET {
     std::cout << "  Left Mouse  - Capture/release mouse (FPS look)" << std::endl;
     std::cout << "  WASD        - Move camera (FPS) / Move target (orbit)" << std::endl;
     std::cout << "  Right Mouse - Rotate camera (orbit)" << std::endl;
+    std::cout << "  R           - Reset camera to default position" << std::endl;
     std::cout << "  Space/P     - Toggle pause" << std::endl;
     std::cout << "  1-6         - Set simulation speed (0.25x to 8x)" << std::endl;
     std::cout << "  F1          - Toggle debug panel" << std::endl;
@@ -6882,6 +8124,9 @@ float4 main(PSInput input) : SV_TARGET {
         UpdateFrame();
 
         // Render
+        if (g_app.worldDiagnostics && g_app.worldDiagnosticsFrames > 0) {
+            AppendRuntimeDiagLog("Main loop before RenderFrame.");
+        }
         RenderFrame();
     }
 

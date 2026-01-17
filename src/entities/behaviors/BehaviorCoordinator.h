@@ -3,6 +3,9 @@
 #include <glm/glm.hpp>
 #include <memory>
 #include <cstdint>
+#include <vector>
+#include <functional>
+#include <unordered_map>
 
 // Include behavior systems
 #include "TerritorialBehavior.h"
@@ -20,6 +23,39 @@ class SeasonManager;
 class BiomeSystem;
 class Terrain;
 // CreatureManager is already forward declared via included behavior headers
+
+// ============================================================================
+// Behavior Life Events (for ActivitySystem integration)
+// ============================================================================
+
+enum class BehaviorEventType {
+    HUNT_START,          // Creature starts hunting
+    HUNT_SUCCESS,        // Hunt succeeded
+    HUNT_FAIL,           // Hunt failed
+    TERRITORIAL_DISPLAY, // Defending territory
+    TERRITORIAL_INTRUSION, // Intruding on territory
+    SOCIAL_JOIN_GROUP,   // Joined a group
+    SOCIAL_LEAVE_GROUP,  // Left a group
+    PARENTAL_CARE_START, // Started caring for offspring
+    PARENTAL_FEED,       // Fed offspring
+    MIGRATION_START,     // Started migration
+    MIGRATION_END,       // Completed migration
+    MATING_DISPLAY,      // Performing mating display
+    PLAY_BEHAVIOR,       // Playing
+    SCAVENGING,          // Scavenging carrion
+    CURIOSITY_EXPLORE    // Exploring out of curiosity
+};
+
+struct BehaviorEvent {
+    BehaviorEventType type;
+    uint32_t creatureID;
+    glm::vec3 position;
+    float timestamp;
+    uint32_t targetID = 0;  // For hunt, care, etc.
+    float intensity = 1.0f; // Event strength (0-1)
+};
+
+using BehaviorEventCallback = std::function<void(const BehaviorEvent&)>;
 
 /**
  * @brief Central coordinator for all emergent creature behavior systems
@@ -180,6 +216,54 @@ public:
      */
     void setVarietyDebugLogging(bool enabled) { m_varietyBehaviors.setDebugLogging(enabled); }
 
+    // ========================================
+    // PHASE 10 - Agent 4: Event System
+    // ========================================
+
+    /**
+     * @brief Register a callback for behavior life events
+     */
+    void registerEventCallback(BehaviorEventCallback callback) { m_eventCallbacks.push_back(callback); }
+
+    /**
+     * @brief Emit a behavior event to all registered listeners
+     */
+    void emitEvent(const BehaviorEvent& event);
+
+    /**
+     * @brief Get recent events for debugging/UI
+     */
+    const std::vector<BehaviorEvent>& getRecentEvents() const { return m_recentEvents; }
+
+    /**
+     * @brief Clear event history
+     */
+    void clearEventHistory() { m_recentEvents.clear(); }
+
+    /**
+     * @brief Get debug statistics for behavior occurrences
+     */
+    struct DebugStats {
+        int huntStarts = 0;
+        int huntSuccesses = 0;
+        int huntFails = 0;
+        int territorialDisplays = 0;
+        int territorialIntrusions = 0;
+        int socialGroupJoins = 0;
+        int socialGroupLeaves = 0;
+        int parentalCareStarts = 0;
+        int parentalFeeds = 0;
+        int migrationStarts = 0;
+        int migrationEnds = 0;
+        int matingDisplays = 0;
+        int playBehaviors = 0;
+        int scavengingEvents = 0;
+        int curiosityExplores = 0;
+        float lastEventTime = 0.0f;
+    };
+    const DebugStats& getDebugStats() const { return m_debugStats; }
+    void resetDebugStats() { m_debugStats = DebugStats(); }
+
 private:
     // Calculate flee force from nearby predators (survival behavior)
     glm::vec3 calculateFleeForce(Creature* creature);
@@ -218,4 +302,16 @@ private:
     // State
     float m_currentTime = 0.0f;
     bool m_initialized = false;
+
+    // Event system (Phase 10, Agent 4)
+    std::vector<BehaviorEventCallback> m_eventCallbacks;
+    std::vector<BehaviorEvent> m_recentEvents;
+    static constexpr size_t MAX_EVENT_HISTORY = 100;
+    DebugStats m_debugStats;
+
+    // Event cooldowns (prevent spam)
+    std::unordered_map<uint32_t, float> m_huntEventCooldowns;       // creatureID -> last event time
+    std::unordered_map<uint32_t, float> m_territorialEventCooldowns;
+    std::unordered_map<uint32_t, float> m_socialEventCooldowns;
+    static constexpr float EVENT_COOLDOWN = 2.0f;  // Minimum 2 seconds between same event type
 };
