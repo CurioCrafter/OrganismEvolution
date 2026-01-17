@@ -1,0 +1,82 @@
+# Auto detect text files and normalize line endings
+* text=auto
+
+# Source code - always LF
+*.c text eol=lf
+*.cpp text eol=lf
+*.h text eol=lf
+*.hpp text eol=lf
+*.inl text eol=lf
+
+# Shader files
+*.hlsl text eol=lf
+*.glsl text eol=lf
+*.frag text eol=lf
+*.vert text eol=lf
+*.comp text eol=lf
+
+# Build/config files
+*.cmake text eol=lf
+*.json text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+CMakeLists.txt text eol=lf
+
+# Documentation
+*.md text eol=lf
+*.txt text eol=lf
+LICENSE text eol=lf
+
+# Scripts
+*.sh text eol=lf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Images - binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.bmp binary
+*.tga binary
+*.dds binary
+*.hdr binary
+
+# 3D models - binary
+*.obj binary
+*.fbx binary
+*.gltf text
+*.glb binary
+
+# Audio - binary
+*.wav binary
+*.mp3 binary
+*.ogg binary
+
+# Fonts - binary
+*.ttf binary
+*.otf binary
+
+# Archives - binary
+*.zip binary
+*.7z binary
+*.tar binary
+*.gz binary
+
+# Compiled shaders - binary
+*.cso binary
+*.spv binary
+*.dxbc binary
+
+# Windows specific
+*.exe binary
+*.dll binary
+*.pdb binary
+*.lib binary
+
+# Diff settings
+*.cpp diff=cpp
+*.h diff=cpp
+*.hpp diff=cpp

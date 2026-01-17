@@ -1,8 +1,8 @@
 #pragma once
 
-#include <GL/glew.h>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
+#include "Frustum.h"
 
 enum CameraMovement {
     FORWARD,
@@ -41,9 +41,42 @@ public:
 
     glm::mat4 getViewMatrix();
     void processKeyboard(CameraMovement direction, float deltaTime);
-    void processMouseMovement(float xoffset, float yoffset, GLboolean constrainPitch = true);
+    void processMouseMovement(float xoffset, float yoffset, bool constrainPitch = true);
     void processMouseScroll(float yoffset);
+    void updateCameraVectors();
+
+    /**
+     * @brief Update the frustum from the current view-projection matrix.
+     * @param aspectRatio The aspect ratio (width/height) for the projection.
+     * @param nearPlane The near clipping plane distance.
+     * @param farPlane The far clipping plane distance.
+     */
+    void updateFrustum(float aspectRatio, float nearPlane = 0.1f, float farPlane = 1000.0f);
+
+    /**
+     * @brief Get the frustum for culling tests.
+     * @return Reference to the camera's frustum.
+     */
+    const Frustum& getFrustum() const { return frustum; }
+
+    /**
+     * @brief Get the projection matrix.
+     * @param aspectRatio The aspect ratio for the projection.
+     * @param nearPlane The near clipping plane distance.
+     * @param farPlane The far clipping plane distance.
+     * @return The projection matrix.
+     */
+    glm::mat4 getProjectionMatrix(float aspectRatio, float nearPlane = 0.1f, float farPlane = 1000.0f) const;
+
+    /**
+     * @brief Get the combined view-projection matrix.
+     * @param aspectRatio The aspect ratio for the projection.
+     * @param nearPlane The near clipping plane distance.
+     * @param farPlane The far clipping plane distance.
+     * @return The combined view-projection matrix.
+     */
+    glm::mat4 getViewProjectionMatrix(float aspectRatio, float nearPlane = 0.1f, float farPlane = 1000.0f);
 
 private:
-    void updateCameraVectors();
+    Frustum frustum;
 };

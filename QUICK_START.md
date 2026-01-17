@@ -1,152 +1,99 @@
-# Quick Start Guide
+# Quick Start Guide (Windows DX12)
 
-## For First-Time Setup
+## 1. Prerequisites
 
-### 1. Install MSYS2
-Download from [https://www.msys2.org/](https://www.msys2.org/) and install.
+- Windows 10 or later
+- Visual Studio 2022 with "Desktop development with C++" workload (or VS 2019+)
+- CMake 3.15+
+- DirectX 12 compatible GPU
 
-### 2. Open MSYS2 MinGW 64-bit Terminal
-Find it in your Start Menu under "MSYS2" folder.
+## 2. Open a Developer Command Prompt
 
-### 3. Install All Dependencies (Copy-Paste This)
-```bash
-pacman -Syu && \
-pacman -S --needed \
-  mingw-w64-x86_64-gcc \
-  mingw-w64-x86_64-cmake \
-  mingw-w64-x86_64-glfw \
-  mingw-w64-x86_64-glew \
-  mingw-w64-x86_64-glm \
-  mingw-w64-x86_64-mesa \
-  git \
-  make
+**IMPORTANT**: You MUST use a Visual Studio Developer Command Prompt, not a regular command prompt.
+
+Options:
+- "Developer PowerShell for VS 2022" (recommended)
+- "x64 Native Tools Command Prompt for VS 2022"
+- "Developer Command Prompt for VS 2022"
+
+**Why?** The build requires MSVC compiler and Windows SDK paths that are only set up in these environments.
+
+## 3. Build and Run
+
+```batch
+cd C:\Users\andre\Desktop\OrganismEvolution
+
+cmake -S . -B build_dx12 -G "Visual Studio 17 2022" -A x64
+cmake --build build_dx12 --config Release
+build_dx12\Release\OrganismEvolution.exe
 ```
 
-### 4. Navigate to Project (Adjust Path if Needed)
-```bash
-cd /c/Users/andre/Desktop/OrganismEvolution
+**Expected output**: A window opens showing a 3D terrain with creatures moving around. Press F1 for debug panel.
+
+## 4. First Steps After Launch
+
+1. **Look around**: Hold left mouse button and drag to rotate camera
+2. **Move camera**: W/A/S/D to move, Q/E to go down/up, Shift for faster movement
+3. **Open debug panel**: Press F1 to see creature stats and spawn controls
+4. **Spawn creatures**: Use the spawn buttons in the debug panel
+5. **Pause/Resume**: Press P to pause the simulation
+6. **Quick save**: Press F5 to save, F9 to load
+
+## Daily Development
+
+For debug builds (slower but with debug symbols):
+
+```batch
+cmake --build build_dx12 --config Debug
+build_dx12\Debug\OrganismEvolution.exe
 ```
 
-### 5. Build and Run
-```bash
-mkdir build && cd build
-cmake .. -G "MinGW Makefiles"
-cmake --build .
-./OrganismEvolution.exe
-```
+## Clean Rebuild
 
-## Daily Development Workflow
+If you encounter build issues:
 
-### Build After Code Changes
-```bash
-cd build
-cmake --build .
-./OrganismEvolution.exe
-```
-
-### Clean Build (if needed)
-```bash
-cd build
-rm -rf *
-cmake .. -G "MinGW Makefiles"
-cmake --build .
-```
-
-### Git Workflow
-```bash
-# Check status
-git status
-
-# Add changes
-git add .
-
-# Commit
-git commit -m "Your commit message"
-
-# Push to GitHub
-git push
-```
-
-## Common Commands
-
-### Verify Installation
-```bash
-gcc --version      # Should show GCC version
-cmake --version    # Should show CMake version
-git --version      # Should show Git version
-```
-
-### Update MSYS2 Packages
-```bash
-pacman -Syu
-```
-
-### Search for Packages
-```bash
-pacman -Ss <package-name>
+```batch
+rmdir /s /q build_dx12
+cmake -S . -B build_dx12 -G "Visual Studio 17 2022" -A x64
+cmake --build build_dx12 --config Release
 ```
 
 ## Troubleshooting
 
-### "Command not found" errors
-Make sure you're using **MSYS2 MinGW 64-bit** terminal, not regular MSYS2.
+### "CMake not found"
+Make sure CMake is installed and in your PATH. Visual Studio 2022 includes CMake - use Developer PowerShell.
 
-### OpenGL errors
-```bash
-pacman -S mingw-w64-x86_64-mesa
-```
+### "'cl' is not recognized"
+You're not using a Developer Command Prompt. Open "Developer PowerShell for VS 2022" from the Start menu.
 
-### CMake can't find packages
-```bash
-pacman -S mingw-w64-x86_64-pkg-config
-```
+### Build errors about missing DirectX headers
+Your Windows SDK may be too old. Update Visual Studio or install Windows SDK 10.0.19041.0 or later.
 
-### Fresh start
-```bash
-rm -rf build
-mkdir build && cd build
-cmake .. -G "MinGW Makefiles"
-cmake --build .
-```
+### Application crashes on startup
+- Check that you have a DirectX 12 compatible GPU
+- Update your graphics drivers
+- Try running from the build directory so shaders can be found
 
-## Project Structure at a Glance
+### Black screen / no creatures
+- Press F1 to open the debug panel
+- Use "Spawn Herbivores" button to add creatures
+- Check that terrain rendering is enabled
 
-```
-OrganismEvolution/
-├── src/
-│   └── main.cpp              # Entry point (currently basic OpenGL setup)
-├── CMakeLists.txt            # Build configuration
-├── PROJECT_PLAN.md           # Full development plan and research
-├── README.md                 # Project overview
-├── SETUP_GUIDE.md            # Detailed setup instructions
-└── QUICK_START.md            # This file
-```
+## Controls Reference
 
-## Next Development Steps
-
-See [PROJECT_PLAN.md](PROJECT_PLAN.md) for the full roadmap. The immediate next phases are:
-
-1. **Phase 1**: Basic rendering (camera, simple shapes)
-2. **Phase 2**: Terrain generation (Perlin noise, island/ocean)
-3. **Phase 3**: Creature foundation (genome, physics, movement)
-4. **Phase 4**: Neural networks (AI behavior)
-5. **Phase 5**: Evolution system (genetic algorithms)
-6. **Phase 6**: Balancing and statistics
-7. **Phase 7**: Polish and features
-
-## Resources
-
-- **Learn OpenGL**: [https://learnopengl.com/](https://learnopengl.com/)
-- **GLFW Docs**: [https://www.glfw.org/docs/latest/](https://www.glfw.org/docs/latest/)
-- **CMake Tutorial**: [https://cmake.org/cmake/help/latest/guide/tutorial/](https://cmake.org/cmake/help/latest/guide/tutorial/)
-- **Project Repository**: [https://github.com/CurioCrafter/OrganismEvolution](https://github.com/CurioCrafter/OrganismEvolution)
-
-## Getting Help
-
-- Review [SETUP_GUIDE.md](SETUP_GUIDE.md) for detailed instructions
-- Check [PROJECT_PLAN.md](PROJECT_PLAN.md) for architecture details
-- Open an issue on GitHub if you encounter problems
+| Key | Action |
+|-----|--------|
+| W/A/S/D | Move camera |
+| Mouse drag | Look around |
+| Q/E | Down/Up |
+| Shift | Move faster |
+| P | Pause |
+| F1 | Debug panel |
+| F2 | Performance profiler |
+| F5 | Quick save |
+| F9 | Quick load |
+| ESC | Exit |
 
 ---
 
-Happy coding! 🧬
+*Verified: January 16, 2026*

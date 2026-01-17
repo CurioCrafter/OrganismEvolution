@@ -1,161 +1,57 @@
-# Setup Guide for OrganismEvolution
+# Setup Guide for OrganismEvolution (Windows DX12)
 
-This guide walks you through setting up the development environment using MSYS2 on Windows.
+This project targets Windows with DirectX 12 and requires MSVC.
 
-## Step 1: Install MSYS2
+## Step 1: Install Visual Studio
 
-1. Download MSYS2 installer from [https://www.msys2.org/](https://www.msys2.org/)
-2. Run the installer (e.g., `msys2-x86_64-xxxxxxxx.exe`)
-3. Follow the installation wizard (default location: `C:\msys64`)
-4. After installation, launch "MSYS2 MinGW 64-bit" from the Start Menu
+Install Visual Studio 2019 or later with:
+- "Desktop development with C++" workload
+- Windows 10/11 SDK (included by default)
 
-## Step 2: Update MSYS2
+## Step 2: Install CMake
 
-Open the MSYS2 MinGW 64-bit terminal and run:
+Download CMake from https://cmake.org/download/ and add it to your PATH, or use the version bundled with Visual Studio.
 
-```bash
-pacman -Syu
-```
+## Step 3: Verify Tools
 
-If it prompts to close the terminal, do so and reopen it, then run:
+Open a Visual Studio Developer Command Prompt and run:
 
-```bash
-pacman -Su
-```
-
-## Step 3: Install Development Tools
-
-Install the required packages for C++ development and OpenGL:
-
-```bash
-pacman -S mingw-w64-x86_64-toolchain
-```
-
-When prompted, press Enter to install all packages in the group.
-
-```bash
-pacman -S mingw-w64-x86_64-cmake \
-          mingw-w64-x86_64-glfw \
-          mingw-w64-x86_64-glew \
-          mingw-w64-x86_64-glm \
-          mingw-w64-x86_64-mesa \
-          git \
-          make
-```
-
-## Step 4: Verify Installation
-
-Check that everything is installed correctly:
-
-```bash
-gcc --version
-g++ --version
+```batch
+cl
 cmake --version
-git --version
 ```
 
-You should see version information for each command.
+Both commands should produce output. If `cl` is not found, you are not in a Developer Command Prompt.
 
-## Step 5: Clone or Navigate to Project
+## Step 4: Build the Project
 
-If you haven't cloned the repository yet:
+```batch
+cd C:\Users\andre\Desktop\OrganismEvolution
 
-```bash
-git clone https://github.com/CurioCrafter/OrganismEvolution.git
-cd OrganismEvolution
+cmake -S . -B build_dx12 -G "Visual Studio 17 2022" -A x64
+cmake --build build_dx12 --config Release
 ```
 
-If you're already in the project directory:
+## Step 5: Run
 
-```bash
-cd /c/Users/andre/Desktop/OrganismEvolution
+```batch
+build_dx12\Release\OrganismEvolution.exe
 ```
 
-## Step 6: Build the Project
+## Common Issues
 
-Create a build directory and compile:
+### "DX12 device creation failed"
 
-```bash
-mkdir build
-cd build
-cmake .. -G "MinGW Makefiles"
-cmake --build .
-```
+Update GPU drivers and verify the GPU supports DirectX 12.
 
-## Step 7: Run the Simulator
+### "Shader not found"
 
-After successful compilation:
+Make sure `Runtime/Shaders` exists next to the executable. Rebuilding the project should copy these automatically.
 
-```bash
-./OrganismEvolution.exe
-```
+### "CMake generator not found"
 
-## Common Issues and Solutions
+Run CMake from a Visual Studio Developer Command Prompt, or ensure the correct Visual Studio version is installed.
 
-### Issue: "cmake: command not found"
-**Solution**: Make sure you're using "MSYS2 MinGW 64-bit" terminal, not "MSYS2 MSYS" or "MSYS2 UCRT64".
+### Linker errors
 
-### Issue: OpenGL linking errors
-**Solution**: Ensure you have the correct OpenGL libraries:
-```bash
-pacman -S mingw-w64-x86_64-mesa
-```
-
-### Issue: GLFW or GLEW not found
-**Solution**: Reinstall the packages:
-```bash
-pacman -S mingw-w64-x86_64-glfw mingw-w64-x86_64-glew
-```
-
-### Issue: "Permission denied" when running executable
-**Solution**: Check if antivirus is blocking the executable. Add an exception for the build directory.
-
-## Development Workflow
-
-1. Make code changes in `src/`
-2. Rebuild the project:
-   ```bash
-   cd build
-   cmake --build .
-   ```
-3. Run and test:
-   ```bash
-   ./OrganismEvolution.exe
-   ```
-
-## IDE Setup (Optional)
-
-### Visual Studio Code
-1. Install "C/C++" extension by Microsoft
-2. Install "CMake Tools" extension
-3. Open the project folder in VS Code
-4. Configure CMake to use MinGW:
-   - Press `Ctrl+Shift+P`
-   - Type "CMake: Select a Kit"
-   - Choose "GCC for mingw-w64-x86_64"
-
-### CLion
-1. Open CLion
-2. Go to Settings → Build, Execution, Deployment → Toolchains
-3. Add MinGW toolchain pointing to `C:\msys64\mingw64`
-4. Open the project's CMakeLists.txt
-
-## Library Documentation
-
-- **GLFW**: [https://www.glfw.org/documentation.html](https://www.glfw.org/documentation.html)
-- **GLEW**: [http://glew.sourceforge.net/](http://glew.sourceforge.net/)
-- **GLM**: [https://github.com/g-truc/glm](https://github.com/g-truc/glm)
-- **OpenGL**: [https://www.opengl.org/](https://www.opengl.org/)
-
-## Next Steps
-
-1. Review [PROJECT_PLAN.md](PROJECT_PLAN.md) for the development roadmap
-2. Check [README.md](README.md) for project overview
-3. Start with Phase 1 implementation (basic rendering)
-
-## Getting Help
-
-- **MSYS2 Documentation**: [https://www.msys2.org/docs/what-is-msys2/](https://www.msys2.org/docs/what-is-msys2/)
-- **OpenGL Tutorial**: [https://learnopengl.com/](https://learnopengl.com/)
-- **CMake Documentation**: [https://cmake.org/documentation/](https://cmake.org/documentation/)
-- **Project Issues**: [https://github.com/CurioCrafter/OrganismEvolution/issues](https://github.com/CurioCrafter/OrganismEvolution/issues)
+Ensure you have the Windows SDK installed as part of the Visual Studio C++ workload.

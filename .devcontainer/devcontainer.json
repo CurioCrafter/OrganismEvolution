@@ -1,0 +1,27 @@
+{
+  "name": "OrganismEvolution Dev Environment",
+  "image": "mcr.microsoft.com/devcontainers/cpp:ubuntu",
+
+  "features": {
+    "ghcr.io/devcontainers/features/git:1": {},
+    "ghcr.io/devcontainers/features/github-cli:1": {}
+  },
+
+  "postCreateCommand": "apt-get update && apt-get install -y libglfw3-dev libglew-dev libglm-dev mesa-common-dev cmake g++",
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-vscode.cpptools",
+        "ms-vscode.cmake-tools",
+        "twxs.cmake"
+      ],
+      "settings": {
+        "cmake.configureOnOpen": true
+      }
+    }
+  },
+
+  "forwardPorts": [],
+  "remoteUser": "vscode"
+}

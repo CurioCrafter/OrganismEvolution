@@ -34,7 +34,7 @@ void Camera::processKeyboard(CameraMovement direction, float deltaTime) {
         Position -= WorldUp * velocity;
 }
 
-void Camera::processMouseMovement(float xoffset, float yoffset, GLboolean constrainPitch) {
+void Camera::processMouseMovement(float xoffset, float yoffset, bool constrainPitch) {
     xoffset *= MouseSensitivity;
     yoffset *= MouseSensitivity;
 
@@ -66,6 +66,21 @@ void Camera::updateCameraVectors() {
     front.z = sin(glm::radians(Yaw)) * cos(glm::radians(Pitch));
     Front = glm::normalize(front);
 
-    Right = glm::normalize(glm::cross(Front, WorldUp));
+    Right = glm::normalize(glm::cross(WorldUp, Front));
     Up = glm::normalize(glm::cross(Right, Front));
+}
+
+void Camera::updateFrustum(float aspectRatio, float nearPlane, float farPlane) {
+    glm::mat4 viewProjection = getViewProjectionMatrix(aspectRatio, nearPlane, farPlane);
+    frustum.update(viewProjection);
+}
+
+glm::mat4 Camera::getProjectionMatrix(float aspectRatio, float nearPlane, float farPlane) const {
+    return glm::perspectiveRH_ZO(glm::radians(Zoom), aspectRatio, nearPlane, farPlane);
+}
+
+glm::mat4 Camera::getViewProjectionMatrix(float aspectRatio, float nearPlane, float farPlane) {
+    glm::mat4 view = getViewMatrix();
+    glm::mat4 projection = getProjectionMatrix(aspectRatio, nearPlane, farPlane);
+    return projection * view;
 }

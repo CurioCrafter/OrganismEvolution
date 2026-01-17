@@ -1,147 +1,171 @@
 # OrganismEvolution
 
-A 3D evolution simulator where creatures with randomly generated traits compete for survival in an environment with islands, oceans, and trees. Successful organisms pass their genetic traits to future generations through natural selection.
+A real-time evolution simulator with neural network creature brains, procedural terrain, and ecosystem simulation. Watch artificial life evolve, hunt, and reproduce in a dynamic 3D world.
 
-## Features
+## Quick Start
 
-- **Procedural Environment**: Island terrain with oceans and vegetation generated using Perlin noise
-- **Genetic Algorithms**: Creatures evolve through mutation, crossover, and natural selection
-- **Neural Networks**: Basic AI for creature decision-making and behavior
-- **3D Visualization**: Real-time OpenGL rendering with free-look camera
-- **Emergent Behavior**: Watch creatures develop food-seeking and survival strategies
+### Prerequisites
 
-## Technology Stack
+- Windows 10/11
+- DirectX 12 compatible GPU
+- Visual Studio 2022 with C++ workload (or 2019+)
+- CMake 3.15+
 
-- **Language**: C++17
-- **Graphics**: OpenGL, GLFW, GLEW
-- **Math**: GLM (OpenGL Mathematics)
-- **Build System**: CMake
-- **Development Environment**: MSYS2 (Windows)
+### Build and Run
 
-## Prerequisites
+Open a **Visual Studio Developer Command Prompt** (this is required!) and run:
 
-### MSYS2 Installation (Windows)
+```batch
+cd C:\Users\andre\Desktop\OrganismEvolution
 
-1. Download and install MSYS2 from [msys2.org](https://www.msys2.org/)
-2. Open MSYS2 MinGW 64-bit terminal
-3. Update package database:
-   ```bash
-   pacman -Syu
-   ```
-4. Install required packages:
-   ```bash
-   pacman -S mingw-w64-x86_64-gcc \
-             mingw-w64-x86_64-cmake \
-             mingw-w64-x86_64-glfw \
-             mingw-w64-x86_64-glew \
-             mingw-w64-x86_64-glm \
-             mingw-w64-x86_64-mesa \
-             git \
-             make
-   ```
+cmake -S . -B build_dx12 -G "Visual Studio 17 2022" -A x64
+cmake --build build_dx12 --config Release
 
-## Building the Project
-
-```bash
-# Clone the repository
-git clone https://github.com/CurioCrafter/OrganismEvolution.git
-cd OrganismEvolution
-
-# Create build directory
-mkdir build
-cd build
-
-# Configure with CMake
-cmake .. -G "MinGW Makefiles"
-
-# Build
-cmake --build .
-
-# Run
-./OrganismEvolution
+build_dx12\Release\OrganismEvolution.exe
 ```
 
 ## Controls
 
-- **WASD**: Move camera
-- **Mouse**: Look around
-- **Space**: Pause/Resume simulation
-- **+/-**: Increase/Decrease simulation speed
-- **ESC**: Exit
+| Key | Action |
+|-----|--------|
+| W/A/S/D | Move camera |
+| Mouse drag | Look around (click to capture) |
+| Q/E | Move camera down/up |
+| Shift | Move faster |
+| P | Pause/Resume simulation |
+| F1 | Toggle debug panel |
+| F2 | Toggle performance profiler |
+| F5 | Quick save |
+| F9 | Quick load |
+| F10 | Toggle replay mode |
+| ESC | Release mouse / Exit |
 
-## How It Works
+## Feature Status
 
-### Creatures
-Each creature has a genome containing:
-- Size (affects speed and energy consumption)
-- Speed (movement rate)
-- Vision range (detection distance)
-- Energy efficiency (survival duration)
-- Neural network weights (behavior patterns)
+### Working Features
 
-### Evolution Process
-1. Creatures start with random genomes
-2. They consume food to gain energy
-3. When energy exceeds a threshold, they reproduce
-4. Offspring inherit traits from parents with mutations
-5. Less fit creatures die out over generations
-6. Population adapts to environmental pressures
+| Feature | Status | Notes |
+|---------|--------|-------|
+| **DirectX 12 Rendering** | Working | GPU-accelerated instanced rendering |
+| **Procedural Terrain** | Working | Perlin noise heightmap with water level |
+| **Grass Rendering** | Working | Instanced grass with wind animation |
+| **Tree Rendering** | Working | L-system procedural trees with LOD |
+| **Water Rendering** | Working | Animated water surface with waves |
+| **Creature Simulation** | Working | Position, velocity, energy-based simulation |
+| **GPU Steering Compute** | Available | Optional compute shader - may need shader path fix |
+| **Creature Types** | Working | Herbivore, Carnivore, Aquatic, Flying |
+| **ImGui Debug Panel** | Working | Real-time stats and spawn controls |
+| **Day/Night Cycle** | Working | Visual lighting changes |
+| **Object Pooling** | Working | Memory-efficient creature management |
+| **Camera System** | Working | Free, orbit, follow, and cinematic modes |
+| **Save/Load System** | Working | F5/F9 quick save, auto-save, save slots |
+| **Replay System** | Working | Record and playback simulation |
+| **Performance Profiler** | Working | Frame timing breakdown |
 
-### Neural Network
-Creatures use a simple feedforward neural network:
-- **Inputs**: Distance to food, distance to threats, current energy, direction to nearest food
-- **Hidden Layers**: 1-2 layers for processing
-- **Outputs**: Movement direction and speed
+### Partial / In Development
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| **Genetic Inheritance** | Partial | Genome exists, basic inheritance on reproduction |
+| **Neural Network Brains** | Partial | Code exists, not deeply integrated into decisions |
+| **Creature Behaviors** | Partial | Basic steering, advanced behaviors scaffolded |
+| **Food Chain** | Partial | Basic predator-prey, simplified energy transfer |
+| **Procedural Animation** | Partial | Skeletal system exists, not connected to creatures |
+
+### Planned (Not Implemented)
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Interactive UI Dashboard | Planned | Disabled in build due to dependencies |
+| Full NEAT Evolution | Planned | Infrastructure only |
+| Multi-Island Archipelago | Planned | Headers exist, not integrated |
+| Audio System | Planned | Code scaffolded, not connected |
+| Climate Effects | Planned | System exists, doesn't affect creatures |
+| Natural Disasters | Planned | System exists, not triggered |
 
 ## Project Structure
 
 ```
 OrganismEvolution/
-├── src/              # Source code
-│   ├── core/         # Simulation engine
-│   ├── entities/     # Creatures and genomes
-│   ├── environment/  # Terrain, trees, food
-│   ├── evolution/    # Genetic algorithms
-│   ├── graphics/     # Rendering system
-│   └── utils/        # Helper functions
-├── shaders/          # GLSL shaders
-├── docs/             # Documentation
-├── CMakeLists.txt    # Build configuration
-└── README.md         # This file
+├── src/                      # Active source code
+│   ├── main.cpp              # Main entry (~6000 lines, self-contained)
+│   ├── entities/             # Creature, Genome, behaviors
+│   ├── environment/          # Terrain, Weather, Climate
+│   ├── graphics/             # DX12 rendering
+│   ├── animation/            # Skeletal animation (partial)
+│   ├── ai/                   # Neural networks, GPU steering
+│   ├── core/                 # Managers, replay, save
+│   ├── physics/              # Collision detection
+│   └── ui/                   # ImGui dashboard (disabled)
+├── shaders/hlsl/             # HLSL shader source files
+├── Runtime/Shaders/          # Compiled shaders (8 files)
+├── ForgeEngine/              # DX12 RHI abstraction layer
+├── external/                 # Third-party: ImGui, GLM, ImPlot
+├── assets/                   # Textures, models, fonts
+├── docs/                     # Additional documentation
+├── tests/                    # Unit tests (not in build)
+├── .github/                  # CI/CD workflows
+└── .devcontainer/            # Dev container config
 ```
 
-## Roadmap
+**Not tracked** (in .gitignore):
+- `build/`, `build_dx12/` - CMake build directories
+- `deprecated/` - Old OpenGL code (archived in git history)
 
-- [x] Project planning and research
-- [ ] Basic OpenGL rendering setup
-- [ ] Procedural terrain generation
-- [ ] Creature physics and movement
-- [ ] Neural network implementation
-- [ ] Genetic algorithm and evolution
-- [ ] Statistics and visualization
-- [ ] Save/load functionality
-- [ ] Performance optimization
+## Technology
 
-## Inspiration
+| Component | Technology |
+|-----------|------------|
+| Language | C++20 |
+| Graphics | DirectX 12 |
+| Shaders | HLSL (SM 6.0) |
+| Math | GLM |
+| UI | Dear ImGui + ImPlot |
+| Build | CMake |
+| Platform | Windows only |
 
-This project draws inspiration from:
-- [ALIEN](https://github.com/chrxh/alien) - CUDA-powered artificial life simulation
-- [Evolution by Keiwan](https://keiwan.itch.io/evolution) - Neural network creature evolution
-- [Karl Sims' Virtual Creatures](https://www.karlsims.com/papers/siggraph94.pdf) - Pioneering work in evolutionary simulation
+## System Requirements
 
-## Contributing
+### Minimum
+- Windows 10 (version 1903+)
+- DirectX 12 compatible GPU
+- 4GB RAM
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+### Recommended
+- Windows 11
+- NVIDIA GTX 1060 / AMD RX 580 or better
+- 8GB RAM
+
+## Build Guides
+
+- [QUICK_START.md](QUICK_START.md) - Fast setup (3 commands)
+- [BUILD_AND_RUN.md](BUILD_AND_RUN.md) - Detailed build instructions
+- [SETUP_GUIDE.md](SETUP_GUIDE.md) - Environment setup
+- [KNOWN_ISSUES.md](KNOWN_ISSUES.md) - Known bugs and limitations
+
+## Limitations
+
+- **Windows only** - Requires DirectX 12
+- **UI Dashboard disabled** - Complex dependencies, not built
+- **Many subsystems scaffolded** - Infrastructure exists but not connected
+- **Performance varies** - Depends on creature count and GPU
+- **Evolution is basic** - Not full genetic algorithm, simple trait inheritance
+
+## Performance Targets
+
+| Creature Count | Target FPS |
+|----------------|-----------|
+| 1,000 | 60 FPS |
+| 5,000 | 30 FPS |
+| 10,000 | 15 FPS |
+
+*Actual performance depends on GPU capability.*
 
 ## License
 
-MIT License - see LICENSE file for details
-
-## Author
-
-CurioCrafter
+MIT License - see [LICENSE](LICENSE) for details.
 
 ---
 
-**Status**: In Development
-**Last Updated**: January 2026
+*Last updated: January 2026*
+*Build verified: January 16, 2026*

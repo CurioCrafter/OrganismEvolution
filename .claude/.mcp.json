@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "simulator-control": {
+      "command": "node",
+      "args": [
+        ".claude/mcp-servers/simulator-control/index.js"
+      ],
+      "cwd": "${CLAUDE_PLUGIN_ROOT}/../..",
+      "disabled": false
+    }
+  }
+}

@@ -1,7 +1,14 @@
 # Build directories
 build/
+build_dx12/
 cmake-build-*/
 out/
+
+# Deprecated code (archived in git history)
+deprecated/
+
+# Windows null device artifact
+nul
 
 # Compiled Object files
 *.o
@@ -66,10 +73,43 @@ Makefile
 *.tmp
 *.bak
 *.cache
+*.backup
+tmpclaude-*
+*.orig
 
 # User-specific settings
 config.ini
 settings.json
 
+# ImGui settings
+imgui.ini
+
 # Assets (add these back if you want to track specific assets)
 # assets/temp/
+
+# Debug files
+*.pdb
+*.ilk
+*.idb
+*.ipdb
+*.iobj
+
+# Windows artifacts
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Package files
+*.7z
+*.dmg
+*.gz
+*.iso
+*.jar
+*.rar
+*.tar
+*.zip
+
+# Shader binaries
+*.cso
+*.dxbc
+*.spv
