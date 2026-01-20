@@ -1,7 +1,7 @@
 # Controls Reference - OrganismEvolution DirectX 12
 
-**Version:** Phase 2 Complete
-**Date:** January 14, 2026
+**Version:** Phase 11 Current
+**Date:** January 19, 2026
 
 This document provides a complete reference for all keyboard shortcuts, mouse controls, and UI interactions.
 
@@ -13,13 +13,13 @@ This document provides a complete reference for all keyboard shortcuts, mouse co
 MOVEMENT                    CAMERA                      SIMULATION
 --------------------------------------------------------------------------------------------------------
 W     - Forward             Mouse Move  - Look around   P         - Pause/Resume
-S     - Backward            Left Click  - Capture       F3        - Toggle Debug Panel
-A     - Strafe Left         Escape      - Release       +/-       - Speed (legacy)
-D     - Strafe Right        Mouse Wheel - Zoom
-Space - Up
-C     - Down
-Ctrl  - Down (alt)
-Q     - Down (alt)
+S     - Backward            Left Click  - Capture       F1        - Toggle Debug Panel
+A     - Strafe Left         Escape      - Release       F2        - Toggle Performance Profiler
+D     - Strafe Right        Mouse Wheel - Zoom          F3        - Toggle Help Overlay
+Space - Up                                              F5        - Quick Save
+C     - Down                                            F9        - Quick Load
+Ctrl  - Down (alt)                                      F10       - Toggle Replay Mode
+Q     - Down (alt)                                      1-6       - Set Simulation Speed
 E     - Up (alt)
 Shift - Sprint (2x speed)
 ```
@@ -59,17 +59,26 @@ Shift - Sprint (2x speed)
 | Key | Action | Details |
 |-----|--------|---------|
 | **P** | Pause/Resume | Toggles simulation pause state |
-| **F3** | Debug Panel | Toggles ImGui debug panel visibility |
+| **F1** | Debug Panel | Toggles ImGui debug panel visibility |
+| **F2** | Performance Profiler | Toggles performance overlay |
+| **F3** | Help Overlay | Toggles help window with controls |
+| **F5** | Quick Save | Saves current simulation state |
+| **F9** | Quick Load | Loads last quick save |
+| **F10** | Replay Mode | Toggles replay recording/playback |
 | **Escape** | Release Mouse | Releases captured mouse cursor |
 
-### Legacy Speed Controls (Console)
+### Speed Controls
 
 | Key | Action | Details |
 |-----|--------|---------|
-| **+** | Increase Speed | Increases simulation time scale |
-| **-** | Decrease Speed | Decreases simulation time scale |
+| **1** | 0.25x Speed | Quarter speed |
+| **2** | 0.5x Speed | Half speed |
+| **3** | 1x Speed | Normal speed |
+| **4** | 2x Speed | Double speed |
+| **5** | 4x Speed | Quadruple speed |
+| **6** | 8x Speed | Maximum speed |
 
-Note: Speed control is now primarily through the ImGui debug panel.
+Note: Speed control is also available through the ImGui debug panel (F1).
 
 ---
 
@@ -111,26 +120,38 @@ When debug panel is open:
 
 ### Accessing the Panel
 
-Press **F3** to toggle the debug panel visibility.
+Press **F1** to toggle the debug panel visibility.
 
 ### Panel Contents
 
 #### Statistics Display
 - **FPS**: Current frames per second
-- **Population**: Total creature count
-- **Herbivores (H)**: Herbivore count
-- **Carnivores (C)**: Carnivore count
+- **Frame Time**: Milliseconds per frame
+- **Population**: Total creature count by type
 - **Food**: Active food item count
-- **Generation**: Current generation number
+- **Time**: Simulation time and day/night cycle
 
 #### Simulation Controls
 - **Pause Button**: Toggle simulation pause
-- **Speed Slider**: Adjust simulation speed (0.25x to 4x)
+- **Speed Slider**: Adjust simulation speed (0.25x to 8x)
 
-#### Debug Options (if available)
-- **Wireframe Mode**: Toggle wireframe rendering
-- **Show Normals**: Visualize surface normals
-- **Show Collision**: Display collision bounds
+#### Creature Controls
+- **Spawn Buttons**: Add creatures of specific types
+- **Kill All Button**: Remove all creatures
+- **Population Limits**: Set min/max creature counts
+
+#### Camera Controls
+- **Camera Mode**: Switch between Free, Orbit, Follow, Cinematic
+- **Focus/Track**: Select and follow creatures
+
+#### Save/Load Controls
+- **Quick Save/Load**: F5/F9 buttons
+- **Save Slots**: Multiple save slot selection
+- **Auto-Save**: Toggle automatic saving
+
+#### Replay Controls
+- **Record/Play**: Toggle replay mode
+- **Playback Controls**: Frame stepping, speed adjustment
 
 ---
 
@@ -280,5 +301,5 @@ For developers modifying controls:
 
 ---
 
-*Controls Reference - Version 1.0*
-*OrganismEvolution DirectX 12 - January 2026*
+*Controls Reference - Version 2.0*
+*OrganismEvolution DirectX 12 - January 19, 2026*

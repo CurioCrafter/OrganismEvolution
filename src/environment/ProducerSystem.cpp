@@ -262,8 +262,8 @@ void ProducerSystem::updateSoilNutrients(float deltaTime) {
     }
 }
 
-float ProducerSystem::consumeAt(const glm::vec3& position, FoodSourceType preferredType, float amount) {
-    FoodPatch* patch = findNearestPatch(position, preferredType, 5.0f);
+float ProducerSystem::consumeAt(const glm::vec3& position, FoodSourceType preferredType, float amount, float range) {
+    FoodPatch* patch = findNearestPatch(position, preferredType, range);
 
     if (!patch || patch->currentBiomass < 0.1f) {
         return 0.0f;
@@ -274,6 +274,34 @@ float ProducerSystem::consumeAt(const glm::vec3& position, FoodSourceType prefer
     patch->consumptionPressure = std::min(1.0f, patch->consumptionPressure + 0.2f);
 
     return consumed * patch->energyPerUnit;
+}
+
+void ProducerSystem::applyBiomassScale(float scale) {
+    float clampedScale = std::clamp(scale, 0.2f, 3.0f);
+    auto scalePatch = [clampedScale](FoodPatch& patch) {
+        patch.maxBiomass *= clampedScale;
+        patch.currentBiomass = std::min(patch.currentBiomass * clampedScale, patch.maxBiomass);
+        patch.regrowthRate *= clampedScale;
+    };
+
+    for (auto& patch : grassPatches) {
+        scalePatch(patch);
+    }
+    for (auto& patch : bushPatches) {
+        scalePatch(patch);
+    }
+    for (auto& patch : treePatches) {
+        scalePatch(patch);
+    }
+    for (auto& patch : planktonPatches) {
+        scalePatch(patch);
+    }
+    for (auto& patch : algaePatches) {
+        scalePatch(patch);
+    }
+    for (auto& patch : seaweedPatches) {
+        scalePatch(patch);
+    }
 }
 
 FoodPatch* ProducerSystem::findNearestPatch(const glm::vec3& pos, FoodSourceType type, float range) {

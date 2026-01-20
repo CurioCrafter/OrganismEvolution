@@ -127,16 +127,19 @@ public:
     // ========================================================================
 
     // Attempt to feed a creature (returns energy gained)
-    float tryFeed(Creature& creature);
+    float tryFeed(Creature& creature, float deltaTime);
 
     // Herbivore feeding (from producers)
-    float feedOnPlant(Creature& herbivore);
+    float feedOnPlant(Creature& herbivore, float deltaTime);
+
+    // Aquatic herbivore feeding (from aquatic producers)
+    float feedOnAquaticPlant(Creature& herbivore, float deltaTime);
 
     // Predator feeding (from prey)
     float feedOnPrey(Creature& predator, Creature& prey);
 
     // Scavenger feeding (from corpses)
-    float feedOnCorpse(Creature& scavenger);
+    float feedOnCorpse(Creature& scavenger, float deltaTime);
 
     // ========================================================================
     // Food Finding
@@ -233,6 +236,7 @@ private:
     float m_transferEfficiency = 0.10f;     // 10% energy transfer
     float m_huntingSuccessModifier = 1.0f;  // Base hunting success
     float m_grazingRate = 5.0f;             // Energy/second when grazing
+    float m_scavengeRate = 5.0f;            // Biomass/second when scavenging
 
     // Base carrying capacities
     std::unordered_map<CreatureType, int> m_baseCapacity;

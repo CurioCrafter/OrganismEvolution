@@ -337,6 +337,8 @@ private:
 
     // Find nearest creature of specified type (uses SpatialGrid for O(1) when available)
     Creature* findNearestCreature(const std::vector<Creature*>& creatures, CreatureType targetType, float maxRange, const SpatialGrid* grid = nullptr) const;
+    Creature* findNearestThreat(const std::vector<Creature*>& creatures, float maxRange, const SpatialGrid* grid = nullptr) const;
+    Creature* findNearestPrey(const std::vector<Creature*>& creatures, float maxRange, const SpatialGrid* grid = nullptr) const;
     std::vector<Creature*> getNeighborsOfType(const std::vector<Creature*>& creatures, CreatureType targetType, float range, const SpatialGrid* grid = nullptr) const;
 
     // Climate response helpers

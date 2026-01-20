@@ -239,5 +239,5 @@ Test files exist but no `enable_testing()` or `add_subdirectory(tests)` in CMake
 
 ---
 
-*Last updated: January 16, 2026*
+*Last updated: January 19, 2026*
 *Updated to reflect actual project state per integration audit*

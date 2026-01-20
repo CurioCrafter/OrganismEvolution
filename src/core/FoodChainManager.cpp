@@ -4,6 +4,7 @@
 #include "../environment/Terrain.h"
 #include "../environment/BiomePalette.h"
 #include "../entities/Creature.h"
+#include "../entities/SwimBehavior.h"
 #include <algorithm>
 #include <cmath>
 
@@ -80,36 +81,40 @@ void FoodChainManager::update(float deltaTime) {
 // Feeding Operations
 // ============================================================================
 
-float FoodChainManager::tryFeed(Creature& creature) {
+float FoodChainManager::tryFeed(Creature& creature, float deltaTime) {
     CreatureType type = creature.getType();
 
-    // Route to appropriate feeding method
-    if (isHerbivore(type)) {
-        return feedOnPlant(creature);
-    } else if (type == CreatureType::SCAVENGER) {
-        return feedOnCorpse(creature);
-    } else if (isPredator(type)) {
-        // Find prey and attempt to feed
-        Creature* prey = findNearestPrey(creature, creature.getVisionRange());
-        if (prey) {
-            return feedOnPrey(creature, *prey);
+    const bool isFlyingOmnivore = (type == CreatureType::FLYING ||
+                                   type == CreatureType::FLYING_BIRD ||
+                                   type == CreatureType::FLYING_INSECT);
+
+    // Amphibians can feed on land or in shallow water depending on position.
+    if (type == CreatureType::AMPHIBIAN) {
+        float waterLevel = SwimBehavior::getWaterLevelConstant();
+        if (creature.getPosition().y < waterLevel - 0.5f) {
+            return feedOnAquaticPlant(creature, deltaTime);
         }
-    } else if (type == CreatureType::OMNIVORE) {
-        // Omnivores try both
-        float energy = feedOnPlant(creature);
-        if (energy < 1.0f) {
-            Creature* prey = findNearestPrey(creature, creature.getVisionRange() * 0.5f);
-            if (prey) {
-                energy += feedOnPrey(creature, *prey);
-            }
-        }
-        return energy;
+        return feedOnPlant(creature, deltaTime);
+    }
+
+    // Aquatic herbivores rely on aquatic producers.
+    if (isAquatic(type) && !isAquaticPredator(type)) {
+        return feedOnAquaticPlant(creature, deltaTime);
+    }
+
+    // Land plants feed herbivores, omnivores, and flying generalists.
+    if (isHerbivore(type) || type == CreatureType::OMNIVORE || isFlyingOmnivore) {
+        return feedOnPlant(creature, deltaTime);
+    }
+
+    if (type == CreatureType::SCAVENGER) {
+        return feedOnCorpse(creature, deltaTime);
     }
 
     return 0.0f;
 }
 
-float FoodChainManager::feedOnPlant(Creature& herbivore) {
+float FoodChainManager::feedOnPlant(Creature& herbivore, float deltaTime) {
     if (!m_ecosystem) return 0.0f;
 
     ProducerSystem* producers = m_ecosystem->getProducers();
@@ -131,9 +136,15 @@ float FoodChainManager::feedOnPlant(Creature& herbivore) {
     } else if (creatureType == CreatureType::GRAZER) {
         preferredType = FoodSourceType::GRASS;
         plantCategory = PlantCategory::GRASS;
+    } else if (creatureType == CreatureType::FLYING_BIRD ||
+               creatureType == CreatureType::FLYING_INSECT ||
+               creatureType == CreatureType::FLYING) {
+        preferredType = FoodSourceType::BUSH_BERRY;
+        plantCategory = PlantCategory::FLOWER;
     }
 
-    float energy = producers->consumeAt(pos, preferredType, m_grazingRate * 0.016f);  // Per frame
+    float feedRange = isFlying(creatureType) ? 9.0f : 7.0f;
+    float energy = producers->consumeAt(pos, preferredType, m_grazingRate * deltaTime, feedRange);
 
     if (energy > 0.0f) {
         // Get nutrition data for this plant type
@@ -141,9 +152,11 @@ float FoodChainManager::feedOnPlant(Creature& herbivore) {
 
         // Calculate creature's preference multiplier based on genome traits
         float creatureSize = herbivore.getSize();
-        bool isHerbivoreType = (creatureType == CreatureType::HERBIVORE ||
-                               creatureType == CreatureType::GRAZER ||
-                               creatureType == CreatureType::BROWSER);
+        bool isHerbivoreType = (isHerbivore(creatureType) ||
+                               creatureType == CreatureType::OMNIVORE ||
+                               creatureType == CreatureType::FLYING ||
+                               creatureType == CreatureType::FLYING_BIRD ||
+                               creatureType == CreatureType::FLYING_INSECT);
 
         // Get food preference from BiomePalette system
         float preferenceMultiplier = g_nutritionManager.getCreatureFoodPreference(
@@ -175,7 +188,7 @@ float FoodChainManager::feedOnPlant(Creature& herbivore) {
         float hydrationBonus = nutrition.hydrationValue * 0.1f;
         finalEnergy += hydrationBonus;
 
-        herbivore.addEnergy(finalEnergy);
+        herbivore.consumeFood(finalEnergy);
 
         // Track energy flow
         m_energyStats.plantToHerbivore += finalEnergy;
@@ -185,6 +198,33 @@ float FoodChainManager::feedOnPlant(Creature& herbivore) {
         recordFeedingEvent(creatureType, CreatureType::GRAZER, finalEnergy, pos);
 
         return finalEnergy;
+    }
+
+    return energy;
+}
+
+float FoodChainManager::feedOnAquaticPlant(Creature& herbivore, float deltaTime) {
+    if (!m_ecosystem) return 0.0f;
+
+    ProducerSystem* producers = m_ecosystem->getProducers();
+    if (!producers) return 0.0f;
+
+    glm::vec3 pos = herbivore.getPosition();
+
+    FoodSourceType preferredType = FoodSourceType::PLANKTON;
+    float size = herbivore.getGenome().size;
+    if (size > 1.1f) {
+        preferredType = FoodSourceType::SEAWEED;
+    } else if (size > 0.8f) {
+        preferredType = FoodSourceType::ALGAE;
+    }
+
+    float energy = producers->consumeAt(pos, preferredType, m_grazingRate * deltaTime, 10.0f);
+    if (energy > 0.0f) {
+        herbivore.consumeFood(energy);
+        m_energyStats.plantToHerbivore += energy;
+        m_energyStats.herbivoreEnergy += energy * m_transferEfficiency;
+        recordFeedingEvent(herbivore.getType(), CreatureType::AQUATIC_HERBIVORE, energy, pos);
     }
 
     return energy;
@@ -221,7 +261,7 @@ float FoodChainManager::feedOnPrey(Creature& predator, Creature& prey) {
     }
 
     // Give energy to predator
-    predator.addEnergy(energyGained);
+    predator.consumeFood(energyGained);
 
     // Track energy flow
     if (isHerbivore(prey.getType())) {
@@ -241,7 +281,7 @@ float FoodChainManager::feedOnPrey(Creature& predator, Creature& prey) {
     return energyGained;
 }
 
-float FoodChainManager::feedOnCorpse(Creature& scavenger) {
+float FoodChainManager::feedOnCorpse(Creature& scavenger, float deltaTime) {
     if (!m_ecosystem) return 0.0f;
 
     DecomposerSystem* decomposers = m_ecosystem->getDecomposers();
@@ -250,10 +290,10 @@ float FoodChainManager::feedOnCorpse(Creature& scavenger) {
     glm::vec3 pos = scavenger.getPosition();
 
     // Try to consume nearby corpse using scavengeCorpse
-    float energy = decomposers->scavengeCorpse(pos, 5.0f);
+    float energy = decomposers->scavengeCorpse(pos, m_scavengeRate * deltaTime);
 
     if (energy > 0.0f) {
-        scavenger.addEnergy(energy * m_transferEfficiency);
+        scavenger.consumeFood(energy * m_transferEfficiency);
 
         // Track energy flow
         m_energyStats.deathDecay -= energy;  // Corpse energy leaving decay pool
@@ -271,13 +311,29 @@ float FoodChainManager::feedOnCorpse(Creature& scavenger) {
 
 glm::vec3 FoodChainManager::findNearestFood(const Creature& creature, float maxRange) const {
     CreatureType type = creature.getType();
+    const bool isFlyingOmnivore = (type == CreatureType::FLYING ||
+                                   type == CreatureType::FLYING_BIRD ||
+                                   type == CreatureType::FLYING_INSECT);
 
-    if (isHerbivore(type)) {
+    if (type == CreatureType::AMPHIBIAN) {
+        if (creature.getPosition().y < SwimBehavior::getWaterLevelConstant() - 0.5f) {
+            return findNearestPlant(creature.getPosition(), FoodSourceType::PLANKTON, maxRange);
+        }
+        return findNearestPlant(creature.getPosition(), FoodSourceType::GRASS, maxRange);
+    }
+
+    if (isAquatic(type) && !isAquaticPredator(type)) {
+        return findNearestPlant(creature.getPosition(), FoodSourceType::PLANKTON, maxRange);
+    }
+
+    if (isHerbivore(type) || type == CreatureType::OMNIVORE || isFlyingOmnivore) {
         // Determine preferred food type
         FoodSourceType preferred = FoodSourceType::GRASS;
         if (type == CreatureType::BROWSER) {
             preferred = FoodSourceType::TREE_LEAF;
         } else if (type == CreatureType::FRUGIVORE) {
+            preferred = FoodSourceType::BUSH_BERRY;
+        } else if (isFlyingOmnivore) {
             preferred = FoodSourceType::BUSH_BERRY;
         }
         return findNearestPlant(creature.getPosition(), preferred, maxRange);
@@ -325,6 +381,16 @@ glm::vec3 FoodChainManager::findNearestPlant(const glm::vec3& position,
             break;
         case FoodSourceType::TREE_FRUIT:
             foodPositions = producers->getTreeFruitPositions();
+            break;
+        case FoodSourceType::PLANKTON:
+            foodPositions = producers->getPlanktonPositions();
+            break;
+        case FoodSourceType::ALGAE:
+            foodPositions = producers->getAlgaePositions();
+            break;
+        case FoodSourceType::SEAWEED:
+        case FoodSourceType::KELP:
+            foodPositions = producers->getSeaweedPositions();
             break;
         default:
             foodPositions = producers->getAllFoodPositions();

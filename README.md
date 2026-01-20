@@ -167,5 +167,5 @@ MIT License - see [LICENSE](LICENSE) for details.
 
 ---
 
-*Last updated: January 2026*
+*Last updated: January 19, 2026*
 *Build verified: January 16, 2026*

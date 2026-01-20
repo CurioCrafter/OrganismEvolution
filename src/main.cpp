@@ -79,6 +79,7 @@
 #include "core/SaveManager.h"
 // Creature Manager (Phase 10)
 #include "core/CreatureManager.h"
+#include "core/FoodChainManager.h"
 // Day/Night Cycle
 #include "core/DayNightCycle.h"
 
@@ -114,6 +115,7 @@
 #include "environment/ClimateSystem.h"
 #include "environment/SeasonManager.h"
 #include "environment/WeatherSystem.h"
+#include "environment/EcosystemManager.h"
 
 // Terrain Rendering System (Phase 5 - 3D World)
 #include "graphics/rendering/TerrainRenderer_DX12.h"
@@ -1975,6 +1977,8 @@ struct AppState {
 
     // PHASE 10 - Agent 1: Unified creature management system
     std::unique_ptr<Forge::CreatureManager> creatureManager;
+    std::unique_ptr<EcosystemManager> ecosystemManager;
+    std::unique_ptr<Forge::FoodChainManager> foodChainManager;
     BehaviorCoordinator behaviorCoordinator;
     SeasonManager seasonManager;
     ClimateSystem climateSystem;
@@ -2376,11 +2380,18 @@ static void ApplyGeneratedWorldData(const WorldGenConfig& proceduralConfig,
 
     g_app.world.terrainSeed = world->planetSeed.terrainSeed;
     g_app.world.SetWorldBounds(worldSize * 0.5f);
+    g_app.ecosystemManager = std::make_unique<EcosystemManager>(g_app.terrain.get());
+    g_app.ecosystemManager->init(world->planetSeed.terrainSeed);
+
     g_app.creatureManager = std::make_unique<Forge::CreatureManager>(worldSize, worldSize);
-    g_app.creatureManager->init(g_app.terrain.get(), nullptr, world->planetSeed.terrainSeed);
+    g_app.creatureManager->init(g_app.terrain.get(), g_app.ecosystemManager.get(), world->planetSeed.terrainSeed);
+
+    g_app.foodChainManager = std::make_unique<Forge::FoodChainManager>();
+    g_app.foodChainManager->init(g_app.creatureManager.get(), g_app.ecosystemManager.get(), g_app.terrain.get());
+
     g_app.behaviorCoordinator.init(g_app.creatureManager.get(),
                                    g_app.creatureManager->getGlobalGrid(),
-                                   nullptr,
+                                   g_app.foodChainManager.get(),
                                    &g_app.seasonManager,
                                    world->biomeSystem.get(),
                                    g_app.terrain.get());
@@ -2522,12 +2533,18 @@ static float GetCreatureRenderSurfaceHeight(const Creature& creature) {
 
 static void ResetUnifiedFoodSources(u32 plantCount) {
     g_app.world.foods.clear();
-    if (plantCount == 0) {
+    if (!g_app.ecosystemManager) {
         return;
     }
 
-    float spawnRadius = g_app.world.GetWorldBounds() * 0.95f;
-    g_app.world.SpawnFood(plantCount, spawnRadius, 40.0f, 60.0f);
+    ProducerSystem* producers = g_app.ecosystemManager->getProducers();
+    if (!producers) {
+        return;
+    }
+
+    const float baselinePlants = 200.0f;
+    float scale = baselinePlants > 0.0f ? static_cast<float>(plantCount) / baselinePlants : 1.0f;
+    producers->applyBiomassScale(scale);
 }
 
 static void SpawnInitialCreatures(const ui::EvolutionStartPreset& evolutionPreset) {
@@ -2563,9 +2580,40 @@ static void SpawnInitialCreatures(const ui::EvolutionStartPreset& evolutionPrese
     std::uniform_int_distribution<size_t> carnivoreTypeDist(0, carnivoreTypes.size() - 1);
     std::uniform_int_distribution<size_t> aquaticTypeDist(0, aquaticTypes.size() - 1);
 
+    auto pickSpawnPosition = [&](CreatureType type, glm::vec3& outPos) -> bool {
+        const int maxAttempts = 20;
+        if (isAquatic(type) && g_app.ecosystemManager) {
+            if (const auto* zone = g_app.ecosystemManager->findBestSpawnZone(type)) {
+                outPos = g_app.ecosystemManager->getAquaticSpawnPosition(*zone, type);
+                return true;
+            }
+        }
+
+        for (int attempt = 0; attempt < maxAttempts; ++attempt) {
+            float x = posDist(g_app.unifiedRng);
+            float z = posDist(g_app.unifiedRng);
+            bool isWater = TerrainSampler::IsWater(x, z);
+
+            if (isAquatic(type)) {
+                if (!isWater) continue;
+            } else {
+                if (isWater) continue;
+            }
+
+            float y = TerrainSampler::SampleHeight(x, z);
+            outPos = glm::vec3(x, y, z);
+            return true;
+        }
+
+        return false;
+    };
+
     auto spawnBatch = [&](CreatureType type, int count) {
         for (int i = 0; i < count; ++i) {
-            glm::vec3 pos(posDist(g_app.unifiedRng), 0.0f, posDist(g_app.unifiedRng));
+            glm::vec3 pos(0.0f);
+            if (!pickSpawnPosition(type, pos)) {
+                break;
+            }
             Forge::CreatureHandle handle = g_app.creatureManager->spawn(type, pos, nullptr);
             if (Creature* creature = g_app.creatureManager->get(handle)) {
                 creature->setGeneration(1);
@@ -2613,6 +2661,10 @@ static void UpdateUnifiedSimulation(float dt) {
     g_app.weatherSystem.update(scaledDt);
     LogWorldDiag("Unified step: climate/weather updated");
 
+    if (g_app.ecosystemManager) {
+        g_app.ecosystemManager->update(scaledDt, g_app.creatureManager->getAllCreatures());
+    }
+
     EnvironmentConditions env;
     const WeatherState weather = g_app.weatherSystem.getInterpolatedWeather();
     env.visibility = std::clamp(1.0f - weather.fogDensity, 0.1f, 1.0f);
@@ -2624,15 +2676,37 @@ static void UpdateUnifiedSimulation(float dt) {
     env.windSpeed = weather.windStrength * 10.0f;
     env.temperature = g_app.climateSystem.getGlobalTemperature() + weather.temperatureModifier;
 
-    std::vector<glm::vec3> foodPositions;
-    foodPositions.reserve(g_app.world.foods.size());
-    for (const auto& food : g_app.world.foods) {
-        if (food->amount > 0.0f) {
-            foodPositions.push_back(food->position);
+    std::vector<glm::vec3> landFoodPositions;
+    std::vector<glm::vec3> aquaticFoodPositions;
+    std::vector<glm::vec3> scavengerFoodPositions;
+    std::vector<glm::vec3> amphibianFoodPositions;
+    size_t totalFoodPositions = 0;
+
+    if (g_app.ecosystemManager) {
+        if (ProducerSystem* producers = g_app.ecosystemManager->getProducers()) {
+            landFoodPositions = producers->getAllFoodPositions();
+            aquaticFoodPositions = producers->getAllAquaticFoodPositions();
+        }
+        if (DecomposerSystem* decomposers = g_app.ecosystemManager->getDecomposers()) {
+            scavengerFoodPositions = decomposers->getCorpsePositions();
         }
     }
+
+    if (!landFoodPositions.empty() && !aquaticFoodPositions.empty()) {
+        amphibianFoodPositions.reserve(landFoodPositions.size() + aquaticFoodPositions.size());
+        amphibianFoodPositions.insert(amphibianFoodPositions.end(),
+                                      landFoodPositions.begin(), landFoodPositions.end());
+        amphibianFoodPositions.insert(amphibianFoodPositions.end(),
+                                      aquaticFoodPositions.begin(), aquaticFoodPositions.end());
+    } else if (!landFoodPositions.empty()) {
+        amphibianFoodPositions = landFoodPositions;
+    } else if (!aquaticFoodPositions.empty()) {
+        amphibianFoodPositions = aquaticFoodPositions;
+    }
+
+    totalFoodPositions = landFoodPositions.size() + aquaticFoodPositions.size() + scavengerFoodPositions.size();
     if (g_app.worldDiagnostics && g_app.worldDiagnosticsFrames > 0) {
-        LogWorldDiag("Unified step: food positions=" + std::to_string(foodPositions.size()));
+        LogWorldDiag("Unified step: food positions=" + std::to_string(totalFoodPositions));
     }
 
     std::vector<Creature*> creatures;
@@ -2669,10 +2743,19 @@ static void UpdateUnifiedSimulation(float dt) {
         if (debugLogged < 3) {
             LogWorldDiag("Unified creature update begin id=" + std::to_string(creature->getID()));
         }
+        const std::vector<glm::vec3>* foodList = &landFoodPositions;
+        if (creature->getType() == CreatureType::SCAVENGER) {
+            foodList = &scavengerFoodPositions;
+        } else if (creature->getType() == CreatureType::AMPHIBIAN) {
+            foodList = &amphibianFoodPositions;
+        } else if (isAquatic(creature->getType())) {
+            foodList = &aquaticFoodPositions;
+        }
+
         creature->update(
             scaledDt,
             *g_app.terrain,
-            foodPositions,
+            *foodList,
             creatures,
             g_app.creatureManager->getGlobalGrid(),
             &env,
@@ -2692,6 +2775,13 @@ static void UpdateUnifiedSimulation(float dt) {
             LogWorldDiag("Unified climate response end id=" + std::to_string(creature->getID()));
         }
 
+        if (g_app.foodChainManager) {
+            float hunger = creature->getHungerLevel();
+            if (hunger > 0.15f) {
+                g_app.foodChainManager->tryFeed(*creature, scaledDt);
+            }
+        }
+
         if (creature->canReproduce() && reproChance(g_app.unifiedRng) < reproRate * scaledDt) {
             float energyCost = 0.0f;
             creature->reproduce(energyCost);
@@ -2709,42 +2799,6 @@ static void UpdateUnifiedSimulation(float dt) {
     }
     LogWorldDiag("Unified step: creature updates done");
 
-    constexpr float FOOD_EAT_RANGE_SQ = 4.0f;
-    for (Creature* creature : creatures) {
-        if (!creature || !creature->isAlive()) {
-            continue;
-        }
-
-        if (!isHerbivore(creature->getType()) && creature->getType() != CreatureType::FLYING) {
-            continue;
-        }
-
-        for (auto& food : g_app.world.foods) {
-            if (food->amount <= 0.0f) {
-                continue;
-            }
-
-            float dx = food->position.x - creature->getPosition().x;
-            float dz = food->position.z - creature->getPosition().z;
-            float distSq = dx * dx + dz * dz;
-
-            if (distSq < FOOD_EAT_RANGE_SQ) {
-                float eatAmount = std::min(food->amount, 10.0f * scaledDt);
-                creature->consumeFood(eatAmount);
-                food->amount -= eatAmount;
-                break;
-            }
-        }
-    }
-    LogWorldDiag("Unified step: food consumption done");
-
-    g_app.world.foods.erase(
-        std::remove_if(g_app.world.foods.begin(), g_app.world.foods.end(),
-                       [](const std::unique_ptr<Food>& food) { return food->amount <= 0.0f; }),
-        g_app.world.foods.end()
-    );
-    LogWorldDiag("Unified step: food cleanup done");
-
     if (!reproQueue.empty()) {
         for (const auto& entry : reproQueue) {
             Forge::CreatureHandle handle = g_app.creatureManager->spawn(
@@ -2759,24 +2813,66 @@ static void UpdateUnifiedSimulation(float dt) {
     }
     LogWorldDiag("Unified step: reproduction done");
 
-    std::uniform_real_distribution<float> spawnChance(0.0f, 1.0f);
+    if (g_app.foodChainManager) {
+        g_app.foodChainManager->update(scaledDt);
+    }
+
     float spawnBound = std::max(1.0f, g_app.world.GetWorldBounds());
     std::uniform_real_distribution<float> posDist(-spawnBound, spawnBound);
 
-    if (spawnChance(g_app.world.respawnRng) < 0.1f * scaledDt &&
-        g_app.world.foods.size() < MAX_FOOD_SOURCES) {
-        for (int attempt = 0; attempt < 5; ++attempt) {
-            float x = posDist(g_app.world.respawnRng);
-            float z = posDist(g_app.world.respawnRng);
-            if (TerrainSampler::IsWater(x, z)) {
-                continue;
+    auto pickRespawnPosition = [&](CreatureType type, glm::vec3& outPos) -> bool {
+        const int maxAttempts = 12;
+        if (isAquatic(type) && g_app.ecosystemManager) {
+            if (const auto* zone = g_app.ecosystemManager->findBestSpawnZone(type)) {
+                outPos = g_app.ecosystemManager->getAquaticSpawnPosition(*zone, type);
+                return true;
             }
+        }
+
+        for (int attempt = 0; attempt < maxAttempts; ++attempt) {
+            float x = posDist(g_app.unifiedRng);
+            float z = posDist(g_app.unifiedRng);
+            bool isWater = TerrainSampler::IsWater(x, z);
+
+            if (isAquatic(type)) {
+                if (!isWater) continue;
+            } else {
+                if (isWater) continue;
+            }
+
             float y = TerrainSampler::SampleHeight(x, z);
-            g_app.world.foods.push_back(std::make_unique<Food>(glm::vec3(x, y, z), 50.0f));
-            break;
+            outPos = glm::vec3(x, y, z);
+            return true;
+        }
+
+        return false;
+    };
+
+    if (g_app.foodChainManager) {
+        const int maxAutoSpawnPerFrame = 12;
+        int spawnedThisFrame = 0;
+        const auto recommendations = g_app.foodChainManager->getSpawnRecommendations();
+
+        for (const auto& rec : recommendations) {
+            if (spawnedThisFrame >= maxAutoSpawnPerFrame) break;
+            int perTypeBudget = std::max(1, static_cast<int>(std::ceil(rec.priority * 4.0f)));
+            int spawnCount = std::min(rec.count, std::min(perTypeBudget, maxAutoSpawnPerFrame - spawnedThisFrame));
+
+            for (int i = 0; i < spawnCount; ++i) {
+                glm::vec3 pos(0.0f);
+                if (!pickRespawnPosition(rec.type, pos)) {
+                    break;
+                }
+
+                Forge::CreatureHandle handle = g_app.creatureManager->spawn(rec.type, pos, nullptr);
+                if (Creature* spawned = g_app.creatureManager->get(handle)) {
+                    spawned->setGeneration(1);
+                    spawnedThisFrame++;
+                }
+            }
         }
     }
-    LogWorldDiag("Unified step: food respawn done");
+    LogWorldDiag("Unified step: ecosystem respawn done");
 
     int maxCreatures = std::max(10, g_app.mainMenu.getSettings().maxCreatures);
     g_app.creatureManager->cullToLimit(static_cast<size_t>(maxCreatures));

@@ -574,7 +574,8 @@ IslandData IslandGenerator::generateCircular(const IslandGenParams& params, int 
     smoothCoastlines(data, 3);
 
     // Generate coastal features
-    generateBeaches(data.heightmap, data.coastalTypeMap, size, params.waterLevel);
+    generateBeaches(data.heightmap, data.coastalTypeMap, size, params.waterLevel,
+                    params.beachWidth, params.maxBeachSlope);
 
     return data;
 }
@@ -616,7 +617,8 @@ IslandData IslandGenerator::generateArchipelago(const IslandGenParams& params, i
     generateUnderwaterTerrain(data);
     markCaveEntrances(data);
     smoothCoastlines(data, 2);
-    generateBeaches(data.heightmap, data.coastalTypeMap, size, params.waterLevel);
+    generateBeaches(data.heightmap, data.coastalTypeMap, size, params.waterLevel,
+                    params.beachWidth, params.maxBeachSlope);
 
     return data;
 }
@@ -658,7 +660,8 @@ IslandData IslandGenerator::generateCrescent(const IslandGenParams& params, int 
     generateUnderwaterTerrain(data);
     markCaveEntrances(data);
     smoothCoastlines(data, 3);
-    generateBeaches(data.heightmap, data.coastalTypeMap, size, params.waterLevel);
+    generateBeaches(data.heightmap, data.coastalTypeMap, size, params.waterLevel,
+                    params.beachWidth, params.maxBeachSlope);
 
     return data;
 }
@@ -701,7 +704,8 @@ IslandData IslandGenerator::generateIrregular(const IslandGenParams& params, int
     generateUnderwaterTerrain(data);
     markCaveEntrances(data);
     smoothCoastlines(data, 4);
-    generateBeaches(data.heightmap, data.coastalTypeMap, size, params.waterLevel);
+    generateBeaches(data.heightmap, data.coastalTypeMap, size, params.waterLevel,
+                    params.beachWidth, params.maxBeachSlope);
 
     return data;
 }
@@ -859,7 +863,8 @@ IslandData IslandGenerator::generateContinental(const IslandGenParams& params, i
     generateUnderwaterTerrain(data);
     markCaveEntrances(data);
     smoothCoastlines(data, 5);
-    generateBeaches(data.heightmap, data.coastalTypeMap, size, params.waterLevel);
+    generateBeaches(data.heightmap, data.coastalTypeMap, size, params.waterLevel,
+                    params.beachWidth, params.maxBeachSlope);
     generateCliffs(data.heightmap, data.coastalTypeMap, size, params.waterLevel);
 
     return data;
@@ -910,15 +915,16 @@ void IslandGenerator::generatePlateaus(std::vector<float>& heightmap, int size, 
     }
 }
 
-void IslandGenerator::generateBeaches(std::vector<float>& heightmap, std::vector<uint8_t>& coastalMap, int size, float waterLevel) {
+void IslandGenerator::generateBeaches(std::vector<float>& heightmap, std::vector<uint8_t>& coastalMap, int size,
+                                      float waterLevel, float beachWidth, float maxBeachSlope) {
     // Expanded beach band with tunable width
     // Beach extends from underwater to above water for smooth transitions
-    float beachWidth = 0.4f;  // 40% of water level by default
+    float clampedWidth = std::clamp(beachWidth, 0.2f, 0.9f);
+    float clampedSlope = std::clamp(maxBeachSlope, 0.02f, 0.2f);
     float beachLow = waterLevel * 0.85f;   // Start underwater
-    float beachHigh = waterLevel * (1.0f + beachWidth);  // End above water
+    float beachHigh = waterLevel * (1.0f + clampedWidth);  // End above water
 
-    const int searchRadius = 8;  // Increased from 3 for wider beach detection
-    const float maxBeachSlope = 0.08f;  // Maximum slope for sandy beaches
+    const int searchRadius = static_cast<int>(6 + clampedWidth * 6.0f);
 
     // First pass: Mark potential beach areas and smooth slopes
     for (int y = 0; y < size; ++y) {
@@ -959,7 +965,7 @@ void IslandGenerator::generateBeaches(std::vector<float>& heightmap, std::vector
                     }
 
                     // Only create beach if slope is gentle enough
-                    if (slope < maxBeachSlope * 2.0f) {  // Allow slightly steeper initial slopes
+                    if (slope < clampedSlope * 2.0f) {  // Allow slightly steeper initial slopes
                         coastalMap[y * size + x] = static_cast<uint8_t>(CoastalFeature::BEACH);
 
                         // Smooth beach transition with gentle slope
@@ -1005,7 +1011,7 @@ void IslandGenerator::generateBeaches(std::vector<float>& heightmap, std::vector
                 });
 
                 // If slope is too steep, smooth it out
-                if (maxDiff > maxBeachSlope) {
+                if (maxDiff > clampedSlope) {
                     // Average with neighbors to reduce slope
                     float avg = (h + hL + hR + hU + hD) * 0.2f;
                     smoothed[y * size + x] = h * 0.5f + avg * 0.5f;
@@ -1610,9 +1616,10 @@ void IslandGenerator::markCaveEntrances(IslandData& data) {
 void IslandGenerator::generateUnderwaterTerrain(IslandData& data) {
     generateSeafloor(data.underwaterHeightmap, data.width, data.params.underwaterDepth);
 
-    // Extended shallow water transition zone
-    float shallowWaterStart = data.params.waterLevel * 0.7f;   // Start shallow water gradient
-    float shallowWaterEnd = data.params.waterLevel;            // Water surface
+    // Extended shallow water transition zone (scale with beach width for longer dropoffs)
+    float shallowStartFactor = std::clamp(1.0f - data.params.beachWidth * 0.9f, 0.35f, 0.8f);
+    float shallowWaterStart = data.params.waterLevel * shallowStartFactor;  // Start shallow water gradient
+    float shallowWaterEnd = data.params.waterLevel;                         // Water surface
 
     // Blend underwater terrain with main heightmap at coastlines
     for (int y = 0; y < data.height; ++y) {

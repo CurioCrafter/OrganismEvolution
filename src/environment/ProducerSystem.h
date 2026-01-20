@@ -60,7 +60,7 @@ public:
     void update(float deltaTime, const SeasonManager* seasonMgr);
     
     // Food consumption by creatures
-    float consumeAt(const glm::vec3& position, FoodSourceType preferredType, float amount);
+    float consumeAt(const glm::vec3& position, FoodSourceType preferredType, float amount, float range = 5.0f);
     
     // Get available food positions for creatures
     std::vector<glm::vec3> getGrassPositions() const;
@@ -97,6 +97,9 @@ public:
     float getBushBiomass() const;
     float getTreeBiomass() const;
     int getActivePatches() const;
+
+    // Scale available biomass and regrowth rates (used to tune initial food abundance)
+    void applyBiomassScale(float scale);
     
     // For rendering
     const std::vector<FoodPatch>& getGrassPatches() const { return grassPatches; }

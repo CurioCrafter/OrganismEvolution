@@ -4,7 +4,7 @@ This directory contains all project documentation, organized into logical catego
 
 > **IMPORTANT:** This project has significant integration gaps. Many systems are implemented but not connected. See [INTEGRATION_AUDIT.md](research/INTEGRATION_AUDIT.md) for the honest assessment of 46 identified issues.
 
-> **Note:** This index was updated on January 16, 2026 to reflect actual project state.
+> **Note:** This index was updated on January 19, 2026 to reflect actual project state.
 
 ## Quick Navigation
 
@@ -15,7 +15,7 @@ This directory contains all project documentation, organized into logical catego
 | [Implementation](implementation/) | 20 | Design & architecture docs | System designs, NEAT, animation |
 | [Research](research/) | 13 | Technical research | **INTEGRATION_AUDIT.md (critical)**, analysis |
 | [Performance](performance/) | 3 | Optimization guides | Benchmarks, optimization strategies |
-| [Issues & Fixes](issues_and_fixes/) | 9 | Bug tracking & fixes | **KNOWN_ISSUES.md**, PROJECT_ISSUES.md |
+| [Issues & Fixes](issues_and_fixes/) | 7 | Bug tracking & fixes | **KNOWN_ISSUES.md**, PROJECT_ISSUES.md |
 | [Testing](testing/) | 2 | Test documentation | Test results, checklists |
 | [Platform Specific](platform_specific/) | 5 | Platform docs | Win32 input system |
 | [Phase Status](phase_status/) | 9 | Project phases | Phase completion reports |
@@ -26,7 +26,7 @@ This directory contains all project documentation, organized into logical catego
 
 ---
 
-## Honest Feature Matrix (Updated Jan 16, 2026)
+## Honest Feature Matrix (Updated Jan 19, 2026)
 
 | Feature | Code Status | Integration Status | Actually Works? |
 |---------|-------------|-------------------|-----------------|

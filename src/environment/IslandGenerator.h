@@ -60,8 +60,8 @@ struct IslandGenParams {
     // Water parameters
     float waterLevel = 0.35f;           // Sea level (0-1)
     float underwaterDepth = 0.2f;       // How deep underwater terrain goes
-    float beachWidth = 0.4f;            // Beach width as fraction of waterLevel (default: 40%)
-    float maxBeachSlope = 0.08f;        // Maximum beach slope before becoming cliff
+    float beachWidth = 0.6f;            // Beach width as fraction of waterLevel (default: 60%)
+    float maxBeachSlope = 0.06f;        // Maximum beach slope before becoming cliff
 
     // Generation seed
     uint32_t seed = 12345;
@@ -186,7 +186,8 @@ private:
     void generateMountains(std::vector<float>& heightmap, int size, float intensity);
     void generateValleys(std::vector<float>& heightmap, int size, float intensity);
     void generatePlateaus(std::vector<float>& heightmap, int size, float intensity);
-    void generateBeaches(std::vector<float>& heightmap, std::vector<uint8_t>& coastalMap, int size, float waterLevel);
+    void generateBeaches(std::vector<float>& heightmap, std::vector<uint8_t>& coastalMap, int size,
+                         float waterLevel, float beachWidth, float maxBeachSlope);
     void generateCliffs(std::vector<float>& heightmap, std::vector<uint8_t>& coastalMap, int size, float waterLevel);
 
     // River generation (hydraulic erosion simplified)

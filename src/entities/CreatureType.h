@@ -226,25 +226,32 @@ inline bool canSurviveInWater(CreatureType type) {
 inline bool canBeHuntedBy(CreatureType prey, CreatureType predator, float preySize) {
     switch (predator) {
         case CreatureType::SMALL_PREDATOR:
-            // Can only hunt small herbivores
-            return prey == CreatureType::FRUGIVORE && preySize < 1.0f;
+            // Can hunt small herbivores and opportunistically snatch small flyers
+            return (prey == CreatureType::FRUGIVORE && preySize < 1.0f) ||
+                   (prey == CreatureType::FLYING_INSECT) ||
+                   (prey == CreatureType::FLYING_BIRD && preySize < 0.9f);
 
         case CreatureType::APEX_PREDATOR:
             // Can hunt all herbivores, small predators, and aquatic creatures (when near surface)
-            return isHerbivore(prey) || prey == CreatureType::SMALL_PREDATOR || prey == CreatureType::AQUATIC;
+            return isHerbivore(prey) || prey == CreatureType::SMALL_PREDATOR || prey == CreatureType::AQUATIC ||
+                   (prey == CreatureType::FLYING_BIRD && preySize < 1.2f) ||
+                   (prey == CreatureType::FLYING_INSECT);
 
         case CreatureType::OMNIVORE:
             // Can hunt small creatures when in predator mode
-            return prey == CreatureType::FRUGIVORE && preySize < 1.2f;
+            return (prey == CreatureType::FRUGIVORE && preySize < 1.2f) ||
+                   (prey == CreatureType::FLYING_INSECT) ||
+                   (prey == CreatureType::FLYING_BIRD && preySize < 0.7f);
 
         case CreatureType::FLYING:
         case CreatureType::FLYING_BIRD:
             // Flying creatures can hunt small herbivores from above
-            return prey == CreatureType::FRUGIVORE && preySize < 0.8f;
+            return (prey == CreatureType::FRUGIVORE && preySize < 0.8f) ||
+                   (prey == CreatureType::FLYING_INSECT);
 
         case CreatureType::FLYING_INSECT:
-            // Insects are generally not predators (though some are - simplification)
-            return false;
+            // Predatory insects target smaller insects
+            return (prey == CreatureType::FLYING_INSECT && preySize < 0.3f);
 
         case CreatureType::AERIAL_PREDATOR:
             // Aerial predators (hawks, eagles) can hunt all small creatures

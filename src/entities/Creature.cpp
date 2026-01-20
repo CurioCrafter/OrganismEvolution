@@ -283,13 +283,13 @@ void Creature::update(float deltaTime, const Terrain& terrain,
     float sensoryCost = genome.calculateSensoryEnergyCost() * deltaTime;
     energy -= sensoryCost;
 
-    // Carnivores have slightly higher base metabolism
-    if (type == CreatureType::CARNIVORE) {
+    // Predators have slightly higher base metabolism
+    if (isPredator(type) || isAquaticPredator(type)) {
         energy -= 0.3f * deltaTime;
     }
 
     // Flying creatures have higher metabolism (flight is energetically expensive)
-    if (type == CreatureType::FLYING) {
+    if (isFlying(type)) {
         // Wing flapping cost (based on flap frequency - faster = more energy)
         float flapCost = genome.flapFrequency * 0.05f * deltaTime;
         // Gliding reduces energy cost (higher glide ratio = less flapping)
@@ -351,7 +351,7 @@ void Creature::update(float deltaTime, const Terrain& terrain,
     }
 
     // Update behavior based on creature type
-    if (type == CreatureType::HERBIVORE) {
+    if (isHerbivore(type)) {
         if (debugCreature) {
             AppendCreatureDiagLog("Creature herbivore behavior begin id=1");
         }
@@ -461,7 +461,7 @@ void Creature::updateBehaviorHerbivore(float deltaTime,
 
         // === Flee behavior (enhanced when fleeIntent high) ===
         if (fleeIntent > 0.3f) {
-            Creature* nearestPredator = findNearestCreature(otherCreatures, CreatureType::CARNIVORE, genome.visionRange, grid);
+            Creature* nearestPredator = findNearestThreat(otherCreatures, genome.visionRange, grid);
             if (nearestPredator != nullptr) {
                 glm::vec3 evadeForce = steering.evasion(position, velocity,
                     nearestPredator->getPosition(), nearestPredator->getVelocity());
@@ -524,7 +524,7 @@ void Creature::updateBehaviorHerbivore(float deltaTime,
         float socialModifier = 1.0f + m_neuralOutputs.socialMod * 0.5f;
         float exploreModifier = 1.0f + m_neuralOutputs.explorationMod * 0.5f;
 
-        Creature* nearestPredator = findNearestCreature(otherCreatures, CreatureType::CARNIVORE, genome.visionRange, grid);
+        Creature* nearestPredator = findNearestThreat(otherCreatures, genome.visionRange, grid);
         if (nearestPredator != nullptr) {
             float predatorDist = glm::length(nearestPredator->getPosition() - position);
             if (predatorDist < genome.visionRange * 0.8f * fearModifier) {
@@ -621,7 +621,7 @@ void Creature::updateBehaviorCarnivore(float deltaTime,
 
         // === Hunting behavior (driven by attackIntent and aggressionLevel) ===
         float huntingRange = genome.visionRange * (1.0f + aggressionLevel * 0.5f);
-        Creature* nearestPrey = findNearestCreature(otherCreatures, CreatureType::HERBIVORE, huntingRange, grid);
+        Creature* nearestPrey = findNearestPrey(otherCreatures, huntingRange, grid);
 
         if (nearestPrey != nullptr && attackIntent > 0.3f) {
             float preyDist = glm::length(nearestPrey->getPosition() - position);
@@ -666,7 +666,7 @@ void Creature::updateBehaviorCarnivore(float deltaTime,
         float exploreModifier = 1.0f + m_neuralOutputs.explorationMod * 0.5f;
 
         float huntingRange = genome.visionRange * 1.2f * aggressionModifier;
-        Creature* nearestPrey = findNearestCreature(otherCreatures, CreatureType::HERBIVORE, huntingRange, grid);
+        Creature* nearestPrey = findNearestPrey(otherCreatures, huntingRange, grid);
 
         if (nearestPrey != nullptr) {
             float preyDist = glm::length(nearestPrey->getPosition() - position);
@@ -1183,15 +1183,20 @@ bool Creature::canReproduce() const {
     // Sterile individuals cannot reproduce
     if (sterile) return false;
 
-    if (type == CreatureType::HERBIVORE) {
-        return energy > herbivoreReproductionThreshold;
-    } else if (type == CreatureType::FLYING) {
-        // Flying creatures need energy and at least 1 kill (omnivore)
-        return energy > flyingReproductionThreshold && killCount >= minKillsToReproduceFlying;
-    } else {
-        // Carnivores need both energy and kills to reproduce
-        return energy > carnivoreReproductionThreshold && killCount >= minKillsToReproduce;
+    const bool isFlyingGeneralist = (isFlying(type) && type != CreatureType::AERIAL_PREDATOR);
+    const bool isAquaticHerbivore = (isAquatic(type) && !isAquaticPredator(type));
+    const bool isPlantEater = (isHerbivore(type) ||
+                               type == CreatureType::OMNIVORE ||
+                               isFlyingGeneralist ||
+                               isAquaticHerbivore);
+
+    if (isPlantEater) {
+        float threshold = isFlyingGeneralist ? flyingReproductionThreshold : herbivoreReproductionThreshold;
+        return energy > threshold;
     }
+
+    // Predators need both energy and kills to reproduce
+    return energy > carnivoreReproductionThreshold && killCount >= minKillsToReproduce;
 }
 
 void Creature::consumeFood(float amount) {
@@ -1206,18 +1211,27 @@ void Creature::consumeFood(float amount) {
 }
 
 void Creature::reproduce(float& energyCost) {
-    if (type == CreatureType::HERBIVORE) {
-        energy -= herbivoreReproductionCost;
-        energyCost = herbivoreReproductionCost;
-    } else if (type == CreatureType::FLYING) {
-        energy -= flyingReproductionCost;
-        energyCost = flyingReproductionCost;
-        killCount = 0;  // Reset kill count after reproduction
-    } else {
-        energy -= carnivoreReproductionCost;
-        energyCost = carnivoreReproductionCost;
-        killCount = 0;  // Reset kill count after reproduction
+    const bool isFlyingGeneralist = (isFlying(type) && type != CreatureType::AERIAL_PREDATOR);
+    const bool isAquaticHerbivore = (isAquatic(type) && !isAquaticPredator(type));
+    const bool isPlantEater = (isHerbivore(type) ||
+                               type == CreatureType::OMNIVORE ||
+                               isFlyingGeneralist ||
+                               isAquaticHerbivore);
+
+    if (isPlantEater) {
+        if (isFlyingGeneralist) {
+            energy -= flyingReproductionCost;
+            energyCost = flyingReproductionCost;
+        } else {
+            energy -= herbivoreReproductionCost;
+            energyCost = herbivoreReproductionCost;
+        }
+        return;
     }
+
+    energy -= carnivoreReproductionCost;
+    energyCost = carnivoreReproductionCost;
+    killCount = 0;  // Reset kill count after reproduction
 }
 
 // ============================================
@@ -1368,7 +1382,7 @@ void Creature::calculateFitness() {
     fitness = survivalFitness + energyFitness + foodFitness + explorationFitness;
 
     // === TYPE-SPECIFIC FITNESS BONUSES ===
-    if (type == CreatureType::HERBIVORE) {
+    if (isHerbivore(type)) {
         // Herbivores: reward for avoiding predators (surviving with predators nearby)
         // If they're alive and have eaten, they've successfully avoided predators
         if (age > 20.0f && foodEaten > 5) {
@@ -1381,7 +1395,7 @@ void Creature::calculateFitness() {
         }
     }
 
-    if (type == CreatureType::CARNIVORE) {
+    if ((isPredator(type) || isAquaticPredator(type)) && !isFlying(type)) {
         // Carnivores: hunting success is THE metric
         fitness += killCount * 75.0f;  // Increased from 50 - kills are HARD
 
@@ -1392,7 +1406,7 @@ void Creature::calculateFitness() {
         }
     }
 
-    if (type == CreatureType::FLYING) {
+    if (isFlying(type)) {
         // Flying: kills + aerial efficiency
         fitness += killCount * 60.0f;
         fitness += distanceTraveled * 0.03f;  // Extra exploration bonus
@@ -1466,11 +1480,76 @@ Creature* Creature::findNearestCreature(const std::vector<Creature*>& creatures,
     return nearest;
 }
 
+Creature* Creature::findNearestThreat(const std::vector<Creature*>& creatures, float maxRange,
+                                       const SpatialGrid* grid) const {
+    const float preySize = genome.size;
+    Creature* nearest = nullptr;
+    float nearestDist = maxRange;
+
+    const std::vector<Creature*>* candidates = &creatures;
+    if (grid) {
+        candidates = &grid->query(position, maxRange);
+    }
+
+    for (Creature* other : *candidates) {
+        if (other == this || !other->isAlive()) continue;
+        if (!canBeHuntedBy(type, other->getType(), preySize)) continue;
+
+        float dist = glm::length(other->getPosition() - position);
+        if (dist < nearestDist) {
+            nearestDist = dist;
+            nearest = other;
+        }
+    }
+
+    return nearest;
+}
+
+Creature* Creature::findNearestPrey(const std::vector<Creature*>& creatures, float maxRange,
+                                     const SpatialGrid* grid) const {
+    Creature* nearest = nullptr;
+    float nearestDist = maxRange;
+
+    const std::vector<Creature*>* candidates = &creatures;
+    if (grid) {
+        candidates = &grid->query(position, maxRange);
+    }
+
+    for (Creature* other : *candidates) {
+        if (other == this || !other->isAlive()) continue;
+        if (!canBeHuntedBy(other->getType(), type, other->getGenome().size)) continue;
+
+        float dist = glm::length(other->getPosition() - position);
+        if (dist < nearestDist) {
+            nearestDist = dist;
+            nearest = other;
+        }
+    }
+
+    return nearest;
+}
+
 std::vector<Creature*> Creature::getNeighborsOfType(const std::vector<Creature*>& creatures,
                                                       CreatureType targetType, float range,
                                                       const SpatialGrid* grid) const {
     // Use SpatialGrid for O(1) average-case performance when available
     if (grid) {
+        if (targetType == CreatureType::HERBIVORE ||
+            targetType == CreatureType::CARNIVORE ||
+            targetType == CreatureType::FLYING) {
+            const auto& nearby = grid->query(position, range);
+            std::vector<Creature*> neighbors;
+            neighbors.reserve(nearby.size());
+            for (Creature* other : nearby) {
+                if (other == this || !other->isAlive()) continue;
+                if (targetType == CreatureType::HERBIVORE && !isHerbivore(other->getType())) continue;
+                if (targetType == CreatureType::CARNIVORE && !isPredator(other->getType())) continue;
+                if (targetType == CreatureType::FLYING && !isFlying(other->getType())) continue;
+                neighbors.push_back(other);
+            }
+            return neighbors;
+        }
+
         std::vector<Creature*> neighbors = grid->queryByType(position, range, static_cast<int>(targetType));
         // Remove ourselves from the result if present
         neighbors.erase(
@@ -1484,7 +1563,16 @@ std::vector<Creature*> Creature::getNeighborsOfType(const std::vector<Creature*>
     std::vector<Creature*> neighbors;
 
     for (Creature* other : creatures) {
-        if (other == this || !other->isAlive() || other->getType() != targetType) continue;
+        if (other == this || !other->isAlive()) continue;
+        if (targetType == CreatureType::HERBIVORE && !isHerbivore(other->getType())) continue;
+        if (targetType == CreatureType::CARNIVORE && !isPredator(other->getType())) continue;
+        if (targetType == CreatureType::FLYING && !isFlying(other->getType())) continue;
+        if (targetType != CreatureType::HERBIVORE &&
+            targetType != CreatureType::CARNIVORE &&
+            targetType != CreatureType::FLYING &&
+            other->getType() != targetType) {
+            continue;
+        }
 
         float dist = glm::length(other->getPosition() - position);
         if (dist < range) {
@@ -1586,16 +1674,7 @@ std::vector<float> Creature::gatherNeuralInputs(const std::vector<glm::vec3>& fo
     for (Creature* other : otherCreatures) {
         if (other == this || !other->isAlive()) continue;
 
-        // For herbivores: carnivores are threats
-        // For carnivores: other larger carnivores could be threats
-        bool isThreat = false;
-        if (type == CreatureType::HERBIVORE && other->getType() == CreatureType::CARNIVORE) {
-            isThreat = true;
-        } else if (type == CreatureType::CARNIVORE && other->getType() == CreatureType::CARNIVORE) {
-            if (other->getGenome().size > genome.size * 1.2f) {
-                isThreat = true;  // Larger carnivore is a threat
-            }
-        }
+        bool isThreat = canBeHuntedBy(type, other->getType(), genome.size);
 
         if (isThreat) {
             float dist = glm::length(other->getPosition() - position);
@@ -1693,14 +1772,7 @@ void Creature::updateNeuralBehavior(const std::vector<glm::vec3>& foodPositions,
         while (angle < -3.14159f) angle += 6.28318f;
 
         // Check for predators
-        bool isPredator = false;
-        if (type == CreatureType::HERBIVORE && other->getType() == CreatureType::CARNIVORE) {
-            isPredator = true;
-        } else if (type == CreatureType::CARNIVORE && other->getType() == CreatureType::CARNIVORE) {
-            if (other->getGenome().size > genome.size * 1.2f) {
-                isPredator = true;
-            }
-        }
+        bool isPredator = canBeHuntedBy(type, other->getType(), genome.size);
         if (isPredator) {
             nearbyPredatorCount++;
             if (dist < nearestPredatorDist) {
@@ -1709,13 +1781,8 @@ void Creature::updateNeuralBehavior(const std::vector<glm::vec3>& foodPositions,
             }
         }
 
-        // Check for prey (carnivores hunting herbivores/smaller creatures)
-        bool isPrey = false;
-        if (type == CreatureType::CARNIVORE && other->getType() == CreatureType::HERBIVORE) {
-            isPrey = true;
-        } else if (type == CreatureType::FLYING && other->getType() == CreatureType::HERBIVORE) {
-            isPrey = true;
-        }
+        // Check for prey (use predator-prey rules)
+        bool isPrey = canBeHuntedBy(other->getType(), type, other->getGenome().size);
         if (isPrey) {
             nearbyPreyCount++;
             if (dist < nearestPreyDist) {
@@ -1844,7 +1911,7 @@ void Creature::updateSensoryBehavior(float deltaTime, const std::vector<Creature
     }
 
     // For herbivores: Use memory to seek food when hungry
-    if (type == CreatureType::HERBIVORE && energy < 100.0f) {
+    if (isHerbivore(type) && energy < 100.0f) {
         if (sensory.getMemory().hasMemoryOf(MemoryType::FOOD_LOCATION)) {
             // We remember where food was - this will influence pathfinding
             // (The actual movement is handled by the behavior functions)
@@ -1910,9 +1977,7 @@ void Creature::updateBehaviorFlying(float deltaTime, const Terrain& terrain,
 
     for (Creature* other : otherCreatures) {
         if (other == this || !other->isAlive()) continue;
-        // Flying creatures can hunt small frugivores
-        if (other->getType() != CreatureType::FRUGIVORE) continue;
-        if (other->getGenome().size > 0.8f) continue;  // Only small prey
+        if (!canBeHuntedBy(other->getType(), type, other->getGenome().size)) continue;
 
         float dist = glm::length(other->getPosition() - position);
         if (dist < nearestPreyDist) {
